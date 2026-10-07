@@ -710,7 +710,8 @@ final class PadUITests: XCTestCase {
         app.typeKey("a", modifierFlags: .command)
         app.typeText(root.path)
         app.typeKey(.return, modifierFlags: [])
-        let useFolder = app.buttons["Use Folder"].firstMatch
+        // The Touch Bar duplicates the label; target the picker’s dialog button.
+        let useFolder = app.dialogs["open-panel"].buttons["OKButton"].firstMatch
         XCTAssertTrue(useFolder.waitForExistence(timeout: 5), app.debugDescription)
         useFolder.click()
         let saved = NSPredicate { _, _ in

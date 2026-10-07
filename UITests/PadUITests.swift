@@ -680,6 +680,61 @@ final class PadUITests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5), "The shortcut must show hidden Markdown before snapshotting")
     }
 
+    func testFirstSaveRequestsFolderAndRemembersAccessAfterRelaunch() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "pad-folder-ui-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = launchPad()
+        app.terminate()
+        app.launchArguments += ["-pad.folderBookmark", "invalid"]
+        app.launch()
+        app.typeKey("n", modifierFlags: .command)
+        defer { app.terminate() }
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
+        app.typeText("Folder permission draft")
+        app.typeKey("s", modifierFlags: .command)
+        let cancel = app.buttons["CancelButton"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), app.debugDescription)
+        cancel.click()
+        expectValue("Folder permission draft", in: editor)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+        editor.click()
+        app.typeKey(.end, modifierFlags: .command)
+        app.typeText(" retained")
+        app.typeKey("s", modifierFlags: .command)
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), app.debugDescription)
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        let path = app.textFields.firstMatch
+        XCTAssertTrue(path.waitForExistence(timeout: 5), app.debugDescription)
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText(root.path)
+        app.typeKey(.return, modifierFlags: [])
+        let useFolder = app.buttons["Use Folder"].firstMatch
+        XCTAssertTrue(useFolder.waitForExistence(timeout: 5), app.debugDescription)
+        useFolder.click()
+        let saved = NSPredicate { _, _ in
+            (try? FileManager.default.contentsOfDirectory(atPath: root.path).count) == 1
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: saved, object: nil)], timeout: 5), .completed)
+        app.terminate()
+        app.launchArguments.removeLast(2)
+        app.launch()
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
+        app.typeText("Remembered folder draft")
+        app.typeKey("s", modifierFlags: .command)
+        let twoFiles = NSPredicate { _, _ in
+            (try? FileManager.default.contentsOfDirectory(atPath: root.path).count) == 2
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: twoFiles, object: nil)], timeout: 5), .completed)
+        XCTAssertFalse(cancel.exists, app.debugDescription)
+        let contents = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .map { try String(contentsOf: $0, encoding: .utf8) }
+        XCTAssertTrue(contents.contains("Folder permission draft retained"), contents.description)
+        XCTAssertTrue(contents.contains("Remembered folder draft"), contents.description)
+    }
+
     private func launchPad(floating: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -25,6 +25,64 @@ import Testing
         return (files, root, defaults, { copiedPath })
     }
 
+    @Test func cancelingFirstFolderSelectionRetainsDraftAndBlocksReplacement() throws {
+        let suite = "pad-folder-cancel-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("txt", forKey: "pad.format")
+        var requests = 0
+        let document = PadDocument(defaults: defaults, presentsWindow: false, copyPath: { _ in },
+                                   selectSaveFolder: { _ in requests += 1; return nil })
+        #expect(document.needsFolderSelection)
+        document.text = "Keep this draft"
+        document.save()
+        document.close()
+        document.newFile()
+        #expect(!document.canTerminate())
+        #expect(requests == 4)
+        #expect(document.url == nil)
+        #expect(document.text == "Keep this draft")
+        #expect(document.isDirty)
+        #expect(!document.isBusy)
+        #expect(document.error == nil)
+        #expect(defaults.data(forKey: "pad.folderBookmark") == nil)
+    }
+
+    @Test func firstSaveRemembersSelectedFolderAndLaterSavesReuseIt() throws {
+        let suite = "pad-folder-save-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        defaults.set("txt", forKey: "pad.format")
+        var requests = 0
+        let document = PadDocument(defaults: defaults, presentsWindow: false, copyPath: { _ in },
+                                   selectSaveFolder: { _ in requests += 1; return root })
+        document.text = "First draft"
+        document.save()
+        let first = try #require(document.url)
+        #expect(first.deletingLastPathComponent() == root)
+        #expect(try String(contentsOf: first, encoding: .utf8) == "First draft")
+        #expect(defaults.data(forKey: "pad.folderBookmark") != nil)
+        #expect(!document.needsFolderSelection)
+        document.newFile()
+        document.text = "Second draft"
+        document.close()
+        #expect(requests == 1)
+        #expect(!document.isDirty)
+        let restored = PadDocument(defaults: defaults, presentsWindow: false, copyPath: { _ in })
+        #expect(restored.folder.resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().path)
+        #expect(!restored.needsFolderSelection)
+        document.resetQuickPadPreferences()
+        #expect(defaults.data(forKey: "pad.folderBookmark") == nil)
+        #expect(document.needsFolderSelection)
+        #expect(document.text == "Second draft")
+        #expect(try String(contentsOf: first, encoding: .utf8) == "First draft")
+    }
+
     @Test func successfulNoticesExpireButErrorsPersist() async throws {
         let (files, root, _, _) = try fixture(noticeDuration: .milliseconds(30))
         defer { try? FileManager.default.removeItem(at: root) }

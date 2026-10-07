@@ -225,8 +225,9 @@ struct SettingsView: View {
                     SettingsOptionsMenu(label: "Save folder options", identifier: "saveFolderOptions",
                                         primaryTitle: "Choose Folder…",
                                         primary: { Task { await document.chooseFolder(parent: settingsWindow) } },
-                                        secondaryTitle: "Use Downloads", secondaryEnabled: !document.isDefaultFolder,
-                                        secondary: { document.useDownloads() })
+                                        secondaryTitle: "Use Downloads…",
+                                        secondaryEnabled: !document.isDefaultFolder || document.needsFolderSelection,
+                                        secondary: { Task { await document.chooseFolder(parent: settingsWindow, useDownloads: true) } })
                         .frame(width: 18, height: 22)
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -244,7 +245,9 @@ struct SettingsView: View {
                     PadNameField(parts: $document.nameParts).frame(height: 26)
                 }
             } header: { Text("Saving") } footer: {
-                Text("Used when saving a new quick-pad file. Opened files keep their name, folder, and format.")
+                Text(document.needsFolderSelection
+                     ? "Choose a folder on your first save, or choose one here. Opened files stay in their own folder."
+                     : "New quick-pad files save here. Opened files stay in their own folder.")
                 if let error = document.error { Text(error).foregroundStyle(Color("ErrorColor")) }
             }
         }.formStyle(.grouped)

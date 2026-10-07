@@ -139,6 +139,7 @@ final class PadDocument {
     private let presentsWindow: Bool
     private let copyPath: @MainActor (String) -> Void
     private let selectOpenFile: (@MainActor () async -> URL?)?
+    private let selectSaveFolder: (@MainActor (URL) -> URL?)?
     private let selectSaveFile: (@MainActor (URL, String) async -> URL?)?
     private let resolveUnsavedChanges: (@MainActor () -> PadUnsavedChangesDecision)?
 
@@ -151,7 +152,7 @@ final class PadDocument {
     private static let nextNumberKey = "pad.nextNumber"
 
     private static var downloadsFolder: URL {
-        // FileManager's Downloads URL is redirected into a sandbox container even with Downloads access.
+        // FileManager points inside the sandbox. This path only suggests a location in the chooser.
         guard let record = getpwuid(getuid()), let home = String(validatingCString: record.pointee.pw_dir) else {
             return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         }
@@ -168,6 +169,7 @@ final class PadDocument {
          },
          selectOpenFile: (@MainActor () async -> URL?)? = nil,
          selectSaveFile: (@MainActor (URL, String) async -> URL?)? = nil,
+         selectSaveFolder: (@MainActor (URL) -> URL?)? = nil,
          resolveUnsavedChanges: (@MainActor () -> PadUnsavedChangesDecision)? = nil) {
         self.role = role
         self.noticeDuration = noticeDuration
@@ -178,6 +180,7 @@ final class PadDocument {
         self.copyPath = copyPath
         self.selectOpenFile = selectOpenFile
         self.selectSaveFile = selectSaveFile
+        self.selectSaveFolder = selectSaveFolder
         self.resolveUnsavedChanges = resolveUnsavedChanges
         #if DEBUG
         let defaultFloating = false
@@ -198,6 +201,10 @@ final class PadDocument {
            let resolved = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) {
             folder = resolved
             folderScope = resolved.startAccessingSecurityScopedResource() ? resolved : nil
+            if stale, folderScope != nil,
+               let refreshed = try? resolved.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+                defaults.set(refreshed, forKey: Self.folderBookmarkKey)
+            }
         }
     }
 
@@ -206,7 +213,13 @@ final class PadDocument {
     var isDirty: Bool { text != savedText }
     var isBusy: Bool { operation != nil }
     var isVisible: Bool { panel?.isVisible == true }
-    var isDefaultFolder: Bool { defaults.data(forKey: Self.folderBookmarkKey) == nil }
+    var isDefaultFolder: Bool { folder.standardizedFileURL == Self.downloadsFolder.standardizedFileURL }
+    var needsFolderSelection: Bool { !hasSaveFolderAccess }
+
+    private var hasSaveFolderAccess: Bool {
+        folderScope != nil || folder.resolvingSymlinksInPath().pathComponents
+            .starts(with: FileManager.default.temporaryDirectory.resolvingSymlinksInPath().pathComponents)
+    }
     var editableName: String { url?.deletingPathExtension().lastPathComponent ?? pendingName ?? "Untitled" }
     var displayName: String {
         url?.lastPathComponent ?? pendingName.map { "\($0).\(currentFormat.rawValue)" } ?? "Untitled"
@@ -383,34 +396,70 @@ final class PadDocument {
         return true
     }
 
-    func chooseFolder(parent: NSWindow? = nil) async {
+    func chooseFolder(parent: NSWindow? = nil, useDownloads: Bool = false) async {
         guard !isBusy else { return }
         operation = .filePanel
         defer { operation = nil }
+        let picker = saveFolderPicker(directory: useDownloads ? Self.downloadsFolder : folder)
+        guard await present(picker, parent: parent ?? dialogParent) == .OK, let chosen = picker.url else { return }
+        do {
+            try rememberSaveFolder(chosen)
+            error = nil
+        } catch { self.error = readableError(error, fallback: "Couldn’t use this folder. Choose another folder.") }
+    }
+
+    private func saveFolderPicker(directory: URL) -> NSOpenPanel {
         let picker = NSOpenPanel()
         picker.canChooseFiles = false
         picker.canChooseDirectories = true
+        picker.allowsMultipleSelection = false
         picker.canCreateDirectories = true
         picker.prompt = "Use Folder"
-        picker.directoryURL = folder
-        guard await present(picker, parent: parent ?? dialogParent) == .OK, let chosen = picker.url else { return }
+        picker.message = "Choose a folder for quick-pad files. PadPad will remember your choice."
+        picker.directoryURL = directory
+        return picker
+    }
+
+    private func rememberSaveFolder(_ chosen: URL) throws {
+        let accessing = chosen.startAccessingSecurityScopedResource()
         do {
             let data = try chosen.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             folderScope?.stopAccessingSecurityScopedResource()
             defaults.set(data, forKey: Self.folderBookmarkKey)
             folder = chosen
-            folderScope = chosen.startAccessingSecurityScopedResource() ? chosen : nil
-            error = nil
-        } catch { self.error = readableError(error, fallback: "Couldn’t use this folder. Choose another folder.") }
+            folderScope = accessing ? chosen : nil
+        } catch {
+            if accessing { chosen.stopAccessingSecurityScopedResource() }
+            throw error
+        }
     }
 
-    func useDownloads() {
-        guard !isBusy else { return }
+    private func obtainSaveFolderAccess() throws -> Bool {
+        guard !hasSaveFolderAccess else { return true }
+        // Close, New Draft, and Quit wait synchronously for a save decision.
+        // Keep their transition locked while the native folder chooser runs.
+        let previousOperation = operation
+        operation = .filePanel
+        defer { operation = previousOperation }
+        let chosen: URL?
+        if let selectSaveFolder {
+            chosen = selectSaveFolder(folder)
+        } else {
+            NSApp.activate()
+            let picker = saveFolderPicker(directory: folder)
+            chosen = picker.runModal() == .OK ? picker.url : nil
+        }
+        guard let chosen else { return false }
+        try rememberSaveFolder(chosen)
+        guard hasSaveFolderAccess else { throw PadError.missingFolder }
+        return true
+    }
+
+    private func forgetSaveFolder() {
         folderScope?.stopAccessingSecurityScopedResource()
         folderScope = nil
         defaults.removeObject(forKey: Self.folderBookmarkKey)
         folder = Self.downloadsFolder
-        error = nil
     }
 
     func newFile(now: Date = .now) {
@@ -616,7 +665,7 @@ final class PadDocument {
                 savedText = text
                 notice = "Saved"
             } else {
-                guard isDefaultFolder || folderScope != nil else { throw PadError.missingFolder }
+                guard try obtainSaveFolderAccess() else { return }
                 let bytes = Data(text.utf8)
                 let destination: URL
                 if let pendingName {
@@ -630,9 +679,7 @@ final class PadDocument {
                 pendingName = nil
                 baseline = bytes
                 savedText = text
-                if !isDefaultFolder {
-                    documentScope = folder.startAccessingSecurityScopedResource() ? folder : nil
-                }
+                documentScope = folder.startAccessingSecurityScopedResource() ? folder : nil
                 copyPath(destination.path)
                 notice = "Saved. Path copied."
             }
@@ -921,7 +968,7 @@ final class PadDocument {
             let directory = url.deletingLastPathComponent()
             if directory.startAccessingSecurityScopedResource() { documentScope = directory }
         }
-        useDownloads()
+        forgetSaveFolder()
         editingShortcuts.restoreDefaults()
         onboarding.resetCompletion()
         // Retained text cannot expire as an accidental consequence of resetting preferences.
@@ -1008,7 +1055,7 @@ final class PadDocument {
         guard documentScope?.standardizedFileURL == source.standardizedFileURL else { return true }
         // A grant for one file does not authorize its new sibling name. Save As can request that grant.
         let directory = source.deletingLastPathComponent().resolvingSymlinksInPath().pathComponents
-        let authorizedFolders = [Self.downloadsFolder, FileManager.default.temporaryDirectory] + [folderScope].compactMap { $0 }
+        let authorizedFolders = [FileManager.default.temporaryDirectory] + [folderScope].compactMap { $0 }
         return authorizedFolders.contains { directory.starts(with: $0.resolvingSymlinksInPath().pathComponents) }
     }
 

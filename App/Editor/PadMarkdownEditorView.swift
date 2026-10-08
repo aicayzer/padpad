@@ -108,6 +108,20 @@ struct PadMarkdownToolbar: View {
             formatToggle("Quote", command: .quote)
             Divider()
             Menu("Lists") { listCommands }
+            Menu("Table") {
+                Button("Insert Table") { editor.table("insert") }
+                Button("Add Row Before") { editor.table("addRowBefore") }
+                Button("Add Row After") { editor.table("addRowAfter") }
+                Button("Add Column Before") { editor.table("addColumnBefore") }
+                Button("Add Column After") { editor.table("addColumnAfter") }
+                Button("Delete Row") { editor.table("deleteRow") }
+                Button("Delete Column") { editor.table("deleteColumn") }
+                Button("Delete Table") { editor.table("deleteTable") }
+                Button("Align Left") { editor.table("alignLeft") }
+                Button("Align Center") { editor.table("alignCenter") }
+                Button("Align Right") { editor.table("alignRight") }
+                Button("Exit Table") { editor.table("exit") }
+            }
         }
     }
 

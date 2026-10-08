@@ -1,12 +1,12 @@
-import { defineConfig } from 'vite'
-import { viteSingleFile } from 'vite-plugin-singlefile'
+import { defineConfig } from "vite";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
 export default defineConfig({
-  base: './',
+  base: "./",
   plugins: [viteSingleFile()],
   build: {
-    target: 'safari18',
+    target: "safari18",
     modulePreload: false,
     cssCodeSplit: false,
   },
-})
+});

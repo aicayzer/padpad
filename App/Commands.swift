@@ -30,6 +30,9 @@ struct AppCommands: Commands {
             }
         }
         CommandGroup(after: .pasteboard) {
+            Button("Paste as Plain Text") { document.pasteAsPlainText() }
+                .keyboardShortcut("v", modifiers: [.command, .option, .shift])
+                .disabled(!canEdit)
             Button("Copy All Contents") { Task { await document.copyAllContents() } }
                 .keyboardShortcut(document.editingShortcuts.shortcut(for: .copyAllContents)?.toSwiftUI)
                 .disabled(!canEdit)

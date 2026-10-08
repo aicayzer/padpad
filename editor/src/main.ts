@@ -1,65 +1,127 @@
-import { postToHost } from "./bridge";
-import { PadEditor, type FormatCommand, type Keymap } from "./editor";
+import { InkKitEditor, type ClipboardOutput } from "@aicayzer/inkkit";
+import "@aicayzer/inkkit/style.css";
 import "./style.css";
 
-declare global {
-  interface Window {
-    editor: {
-      load(markdown: string, generation: number): void;
-      reload(markdown: string, generation: number): void;
-      markdown(): string | null;
-      clipboard(): { text: string; html: string };
-      format(command: FormatCommand, arg?: string | number): void;
-      focus(): void;
-      insertText(text: string, generation: number): boolean;
-      keyDown(
-        key: string,
-        code: string,
-        metaKey: boolean,
-        ctrlKey: boolean,
-        altKey: boolean,
-        shiftKey: boolean,
-        generation: number,
-      ): boolean;
-      find(text: string): void;
-      insertPaths(paths: string[], x: number, y: number): void;
-      setAccent(color: string): void;
-      setTextSize(px: number): void;
-      setReadingWidth(width: number | null): void;
-      setKeymap(keymap: Keymap): void;
-    };
-  }
+function post(message: Record<string, unknown>): void {
+  const host = (
+    window as unknown as {
+      webkit?: {
+        messageHandlers?: { host?: { postMessage(message: unknown): void } };
+      };
+    }
+  ).webkit?.messageHandlers?.host;
+  if (host) host.postMessage(message);
 }
 
 const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
-
-const formattedRoot = document.createElement("div");
-root.append(formattedRoot);
-const formatted = await PadEditor.mount(formattedRoot, {
-  changed(markdown, generation) {
-    postToHost({ type: "changed", markdown, generation });
+let generation = 0;
+const clipboardReplies = new Map<
+  string,
+  { resolve(): void; reject(error: Error): void }
+>();
+function writeClipboard(output: ClipboardOutput): Promise<void> {
+  const scope = editor.snapshot();
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      clipboardReplies.delete(requestId);
+      reject(new Error("Clipboard write timed out"));
+    }, 15000);
+    clipboardReplies.set(requestId, {
+      resolve() {
+        clearTimeout(timeout);
+        resolve();
+      },
+      reject(error) {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    });
+    post({
+      type: "writeClipboard",
+      requestId,
+      documentId: scope.documentId,
+      generation: scope.generation,
+      text: output.text,
+      html: output.html,
+    });
+  });
+}
+const editor = await InkKitEditor.mount(
+  root,
+  {
+    changed(markdown, generation) {
+      post({ type: "changed", markdown, generation });
+    },
+    stateChanged(state) {
+      post({ type: "state", ...state, generation });
+    },
+    openLink(href) {
+      post({ type: "openLink", href });
+    },
+    copy(text) {
+      post({ type: "copy", text });
+    },
+    error(error) {
+      post({ type: "editorWarning", message: error.message });
+    },
+    clipboard: writeClipboard,
   },
-  stateChanged(state) {
-    postToHost({ type: "state", ...state });
+  {},
+);
+const facade = {
+  clipboardResponse(requestId: string, response: { error?: string }) {
+    const reply = clipboardReplies.get(requestId);
+    clipboardReplies.delete(requestId);
+    if (response.error) reply?.reject(new Error(response.error));
+    else reply?.resolve();
   },
-  openLink(href) {
-    postToHost({ type: "openLink", href });
+  load(
+    text: string,
+    nextGeneration: number,
+    documentId = String(nextGeneration),
+  ) {
+    generation = nextGeneration;
+    editor.loadDocument({ text, generation, documentId, format: "md" });
   },
-  copy(text) {
-    postToHost({ type: "copy", text });
+  reload(
+    text: string,
+    nextGeneration: number,
+    documentId = String(nextGeneration),
+  ) {
+    generation = nextGeneration;
+    editor.reloadDocument({ text, generation, documentId, format: "md" });
   },
-});
-
-const editor = formatted;
-editor.setKeymap({
-  bold: ["Mod-b"],
-  italic: ["Mod-i"],
-  code: ["Mod-e"],
-  heading1: ["Mod-Alt-1"],
-  heading2: ["Mod-Alt-2"],
-  heading3: ["Mod-Alt-3"],
-});
+  snapshot: (expectedGeneration: number) => editor.snapshot(expectedGeneration),
+  clipboard: () => editor.clipboardSnapshot(true),
+  format: editor.format.bind(editor),
+  focus: editor.focus.bind(editor),
+  find: editor.find.bind(editor),
+  insertText: editor.insertText.bind(editor),
+  keyDown: editor.keyDown.bind(editor),
+  insertPaths: editor.insertPaths.bind(editor),
+  pasteAsPlainText: editor.pasteAsPlainText.bind(editor),
+  table: editor.table.bind(editor),
+  setAccent: (color: string) =>
+    document.documentElement.style.setProperty("--accent", color),
+  setTextSize: (px: number) =>
+    document.documentElement.style.setProperty("font-size", `${px}px`),
+  setReadingWidth: (width: number | null) => {
+    if (width !== null && Number.isFinite(width) && width > 0)
+      document.documentElement.style.setProperty(
+        "--reading-width",
+        `${width}px`,
+      );
+    else document.documentElement.style.removeProperty("--reading-width");
+  },
+  setKeymap: editor.setKeymap.bind(editor),
+};
+Object.assign(window, { editor: facade });
+for (const name of ["keydown", "keyup"] as const)
+  window.addEventListener(name, (event) =>
+    document.documentElement.classList.toggle("meta", event.metaKey),
+  );
 window.addEventListener("keydown", (event) => {
   if (
     event.metaKey &&
@@ -68,51 +130,16 @@ window.addEventListener("keydown", (event) => {
     event.key.toLowerCase() === "k"
   ) {
     event.preventDefault();
-    postToHost({ type: "requestLink" });
+    post({ type: "requestLink" });
   }
 });
-
-// Links open on ⌘-click, so the pointer says so only while ⌘ is down.
-for (const name of ["keydown", "keyup"] as const) {
-  window.addEventListener(name, (event) =>
-    document.documentElement.classList.toggle("meta", event.metaKey),
-  );
-}
 window.addEventListener("blur", () =>
   document.documentElement.classList.remove("meta"),
 );
-
-window.editor = {
-  load: (markdown, generation) => editor.load(markdown, generation),
-  reload: (markdown, generation) => editor.reload(markdown, generation),
-  markdown: () => editor.markdown(),
-  clipboard: () => editor.clipboard(),
-  format: (command, arg) => editor.format(command, arg),
-  focus: () => editor.focus(),
-  insertText: (text, generation) => editor.insertText(text, generation),
-  keyDown: (key, code, meta, ctrl, alt, shift, generation) =>
-    editor.keyDown(key, code, meta, ctrl, alt, shift, generation),
-  find: (text) => editor.find(text),
-  insertPaths: (paths, x, y) => editor.insertPaths(paths, x, y),
-  setAccent: (color) =>
-    document.documentElement.style.setProperty("--accent", color),
-  setTextSize: (px) =>
-    document.documentElement.style.setProperty("font-size", `${px}px`),
-  setReadingWidth: (width) => {
-    if (width !== null && Number.isFinite(width) && width > 0) {
-      document.documentElement.style.setProperty("--reading-width", `${width}px`);
-    } else {
-      document.documentElement.style.removeProperty("--reading-width");
-    }
-  },
-  setKeymap: (keymap) => editor.setKeymap(keymap),
-};
-
 window.addEventListener("error", (event) =>
-  postToHost({ type: "error", message: event.message }),
+  post({ type: "error", message: event.message }),
 );
 window.addEventListener("unhandledrejection", (event) =>
-  postToHost({ type: "error", message: String(event.reason) }),
+  post({ type: "error", message: String(event.reason) }),
 );
-
-postToHost({ type: "ready" });
+post({ type: "ready" });

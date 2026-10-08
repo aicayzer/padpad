@@ -1,24 +1,19 @@
-# Editor bridge
+# Offline editor bridge
 
-The app bundles the editor offline. `window.webkit.messageHandlers.host` receives JSON messages:
+The app bootstrap consumes `@aicayzer/inkkit` and bundles its JavaScript and CSS into one offline HTML file. The native app owns document identity, generation, storage, appearance, and keyboard bindings. InkKit owns editing, preservation, tables, and clipboard conversion.
 
-- `ready`: the editor and `window.editor` are available.
-- `changed`: `markdown` and the integer `generation` supplied to `load` or `reload`.
-- `state`: `marks` (`bold`, `italic`, `strikethrough`, `code`, `link`), `block` (`paragraph`, `heading` with `level`, `codeBlock`, `bulletList`, `orderedList`, `taskList`), and `quoted`.
-- `requestLink` opens the native link editor for Command-K.
-- `openLink` with `href`, `copy` with `text`, and `error` with `message`.
+## Documents and snapshots
 
-Native calls on `window.editor`:
+`load(text, generation, documentId)` and `reload(text, generation, documentId)` pass Markdown documents to InkKit. `snapshot(expectedGeneration)` returns complete current source with `documentId`, `generation`, `revision`, `format`, and `dirty`. Unchanged text is a successful snapshot; readiness, composition, pending images, stale generations, and script failures throw. Native save, export, close, switching, and termination must stop when retrieval fails.
 
-- `load(markdown, generation)` replaces the document and moves the caret to its end.
-- `reload(markdown, generation)` replaces content while retaining the caret and scroll position.
-- `markdown()` synchronously reads current content, returning `null` if the document matches its loaded baseline. The host must retain the original source in this case, so merely opening a document never rewrites it.
-- `insertText(text, generation)` applies buffered native typing through the editor's input rules and rejects stale documents. It returns false during native composition. The host awaits completion before releasing later typing or taking a snapshot.
-- `keyDown(key, code, metaKey, ctrlKey, altKey, shiftKey, generation)` offers buffered commands to existing keymaps and returns whether they handled the event. Unhandled browser and app keys retain native handling. Native buffers resolve dead keys and marked text before calling `insertText`; unfinished composition prevents a snapshot. Never reinterpret raw key events as committed text.
-- `format(command, arg?)`, `focus()`, `find(text)`, `insertPaths(paths, x, y)`, `setAccent(color)`, `setTextSize(px)`, `setKeymap(bindings)`.
+`changed` carries Markdown and generation. Discard reports belonging to previous documents. Appearance and formatting changes do not reload source.
 
-Formatting commands are `bold`, `italic`, `strikethrough`, `code`, `heading` (level 1–3), `paragraph`, `codeBlock` (optional language), `quote`, `bulletList`, `orderedList`, `taskList`, and `link` (URL).
+## Clipboard and images
 
-The host must snapshot before document operations rather than depending on change notifications, reject stale generations, and retain content if retrieval fails. Loading resets undo history. Formatting key bindings belong to the host.
+Ordinary copy exports readable text and semantic HTML. `clipboard()` asynchronously captures all content; await it before replacing the pasteboard. Copy as Markdown uses a fresh snapshot. `pasteAsPlainText(text)` inserts literal text.
 
-Common Markdown is formatted regardless of its original spelling. HTML, images, reference syntax, frontmatter, tables and footnotes are retained in editable literal blocks; they are never executed or fetched. The surrounding supported content stays formatted. Edited supported Markdown uses canonical serialization. There is no whole-document source fallback, image storage, or network access.
+PadPad mounts InkKit without an image adapter and preserves image syntax literally. It does not import, store, resolve, or export managed image bytes. `writeClipboard` receives readable text and semantic HTML only; the native `PadClipboardContents` writer supplies those representations. Scoped requests receive `clipboardResponse` acknowledgments after a successful native write; stale requests and write failures reject the operation. TXT editing remains in the native text editor.
+
+## Verification
+
+Install the locked registry dependency with `pnpm install --frozen-lockfile`, then run editor type checking, consumer tests, and the offline build. Engine regression suites belong in InkKit. Native tests additionally exercise snapshot failure and clipboard interoperability. The app bundles the published package offline; it does not require a network connection at runtime.

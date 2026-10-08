@@ -9,6 +9,7 @@ enum PadMarkdownFormatCommand: String {
 enum PadMarkdownEditorError: LocalizedError {
     case notReady, documentChanged, invalidResponse, unavailable, composing
     case script(String), warning(String)
+    case snapshotRejected(code: String, message: String)
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,14 @@ enum PadMarkdownEditorError: LocalizedError {
         case .unavailable: "The editor is unavailable. Your text is still open."
         case .script: "The editor couldn’t complete that action. Your text is still open."
         case .warning(let message): message
+        case .snapshotRejected(let code, _):
+            switch code {
+            case "composition": "Finish typing before saving or closing."
+            case "not-ready": "The editor is still loading. Try again in a moment."
+            case "stale-document": "Your text changed. Try again."
+            case "operation-pending": "The editor is finishing a paste. Try again in a moment."
+            default: "Couldn’t preserve your text. Your text is still open. Try again."
+            }
         }
     }
 }
@@ -161,8 +170,19 @@ final class PadMarkdownEditorController: NSObject {
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
         let result = try await webView.evaluateJavaScript("window.editor.snapshot(\(expectedGeneration))")
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
-        guard let payload = result as? [String: Any],
-              payload["generation"] as? Int == expectedGeneration,
+        guard let payload = result as? [String: Any] else { throw PadMarkdownEditorError.invalidResponse }
+        if let code = payload["snapshotError"] as? String {
+            guard let message = payload["message"] as? String else { throw PadMarkdownEditorError.invalidResponse }
+            switch code {
+            case "not-ready", "stale-document", "composition", "operation-pending", "preservation":
+                throw PadMarkdownEditorError.snapshotRejected(code: code, message: message)
+            default:
+                let error = PadMarkdownEditorError.script(message)
+                report(error)
+                throw error
+            }
+        }
+        guard payload["generation"] as? Int == expectedGeneration,
               payload["documentId"] as? String == documentID?.uuidString,
               let markdown = payload["text"] as? String,
               payload["format"] as? String == "md", payload["revision"] is Int,

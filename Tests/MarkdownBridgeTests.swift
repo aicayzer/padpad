@@ -6,6 +6,55 @@ import WebKit
 @MainActor
 @Suite(.serialized, .opensWindows)
 struct MarkdownBridgeTests {
+    @Test func browserCompositionRejectionDoesNotDisableLaterSnapshots() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Keep this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        var failures = 0
+        editor.onError = { _ in failures += 1 }
+
+        // Native marked-text guards must retain the document without touching the script bridge.
+        editor.hasExternalMarkedText = { true }
+        do {
+            _ = try await editor.snapshot()
+            Issue.record("Native marked text should reject the snapshot")
+        } catch PadMarkdownEditorError.composing {} catch { Issue.record("Unexpected native error: \(error)") }
+        editor.hasExternalMarkedText = { false }
+
+        // ProseMirror can begin composition independently after native guards have passed.
+        _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true})); true")
+        do {
+            _ = try await editor.snapshot()
+            Issue.record("Browser composition should reject the snapshot")
+        } catch PadMarkdownEditorError.snapshotRejected(let code, _) {
+            #expect(code == "composition")
+        } catch { Issue.record("Unexpected browser error: \(error)") }
+        _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true})); true")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(editor.isReady)
+        #expect(failures == 0)
+        #expect(try await editor.snapshot() == nil)
+        editor.format(.heading, argument: "2")
+        #expect(try await editor.snapshot()?.hasPrefix("## Keep this text") == true)
+        let clipboard = try await editor.clipboardSnapshot()
+        #expect(clipboard.text == "Keep this text")
+        #expect(clipboard.html?.contains("<h2") == true)
+    }
+
+    @Test func unknownSnapshotFailureStillDisablesTheBridge() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Retain this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        _ = try await editor.webView.evaluateJavaScript("window.editor.snapshot = () => {throw new Error('Unexpected snapshot failure')}; true")
+        await #expect(throws: (any Error).self) { _ = try await editor.snapshot() }
+        for _ in 0..<100 {
+            if !editor.isReady { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!editor.isReady)
+        await #expect(throws: (any Error).self) { _ = try await editor.snapshot() }
+    }
+
     @Test func queuedReplacementLoadsApplyOnlyTheLatestDocument() async throws {
         let editor = PadMarkdownEditorController()
         editor.load("Initial\n", documentID: UUID())

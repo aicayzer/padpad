@@ -4,7 +4,7 @@ The app bootstrap consumes `@aicayzer/inkkit` and bundles its JavaScript and CSS
 
 ## Documents and snapshots
 
-`load(text, generation, documentId)` and `reload(text, generation, documentId)` pass Markdown documents to InkKit. `snapshot(expectedGeneration)` returns complete current source with `documentId`, `generation`, `revision`, `format`, and `dirty`. Unchanged text is a successful snapshot; readiness, composition, pending images, stale generations, and script failures throw. Native save, export, close, switching, and termination must stop when retrieval fails.
+`load(text, generation, documentId)` and `reload(text, generation, documentId)` pass Markdown documents to InkKit. `snapshot(expectedGeneration)` returns complete current source with `documentId`, `generation`, `revision`, `format`, and `dirty`. Unchanged text is a successful snapshot. Known InkKit rejections return `{snapshotError, message}` instead of escaping the native JavaScript evaluation and triggering a fatal browser error. Native readiness, composition, pending operations, stale generations, and preservation rejections stop the current operation while leaving later snapshots available. Destroyed editors, unknown rejection codes, and genuine script failures disable the bridge. Native save, export, close, switching, and termination must stop when retrieval fails.
 
 `changed` carries Markdown and generation. Discard reports belonging to previous documents. Appearance and formatting changes do not reload source.
 

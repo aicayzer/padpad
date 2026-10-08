@@ -1,4 +1,8 @@
-import { InkKitEditor, type ClipboardOutput } from "@aicayzer/inkkit";
+import {
+  InkKitEditor,
+  InkKitError,
+  type ClipboardOutput,
+} from "@aicayzer/inkkit";
 import "@aicayzer/inkkit/style.css";
 import "./style.css";
 
@@ -93,7 +97,15 @@ const facade = {
     generation = nextGeneration;
     editor.reloadDocument({ text, generation, documentId, format: "md" });
   },
-  snapshot: (expectedGeneration: number) => editor.snapshot(expectedGeneration),
+  snapshot(expectedGeneration: number) {
+    try {
+      return editor.snapshot(expectedGeneration);
+    } catch (error) {
+      if (error instanceof InkKitError)
+        return { snapshotError: error.code, message: error.message };
+      throw error;
+    }
+  },
   clipboard: () => editor.clipboardSnapshot(true),
   format: editor.format.bind(editor),
   focus: editor.focus.bind(editor),

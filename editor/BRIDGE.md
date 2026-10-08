@@ -12,10 +12,8 @@ The app bootstrap consumes `@aicayzer/inkkit` and bundles its JavaScript and CSS
 
 Ordinary copy exports readable text and semantic HTML. `clipboard()` asynchronously captures all content; await it before replacing the pasteboard. Copy as Markdown uses a fresh snapshot. `pasteAsPlainText(text)` inserts literal text.
 
-PadPad mounts InkKit without an image adapter and preserves image syntax literally. It does not import, store, resolve, or export managed image bytes. `writeClipboard` receives readable text and semantic HTML only; the native `PadClipboardContents` writer supplies those representations. TXT editing remains in the native text editor.
+PadPad mounts InkKit without an image adapter and preserves image syntax literally. It does not import, store, resolve, or export managed image bytes. `writeClipboard` receives readable text and semantic HTML only; the native `PadClipboardContents` writer supplies those representations. Scoped requests receive `clipboardResponse` acknowledgments after a successful native write; stale requests and write failures reject the operation. TXT editing remains in the native text editor.
 
 ## Verification
 
-Install the exact InkKit release tarball in this isolated integration branch, then run editor type checking, consumer tests, and the offline build. Copied engine regression suites belong in InkKit. Native tests additionally exercise snapshot failure and clipboard interoperability. Keep tarball paths out of production manifests; use the registry version after publication.
-
-These branches prepare the integration before npm publication. The manifest names `0.0.1`; regenerate and verify the registry lockfile after that version exists. Provisional verification installs the exact tarball only in disposable copies, leaving local tarball paths out of the eventual production lockfile.
+Install the locked registry dependency with `pnpm install --frozen-lockfile`, then run editor type checking, consumer tests, and the offline build. Engine regression suites belong in InkKit. Native tests additionally exercise snapshot failure and clipboard interoperability. The app bundles the published package offline; it does not require a network connection at runtime.

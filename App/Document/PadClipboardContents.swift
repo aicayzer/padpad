@@ -5,11 +5,23 @@ struct PadClipboardContents: Equatable {
     var html: String?
 
     @MainActor
-    func write(to pasteboard: NSPasteboard) {
+    func write(to pasteboard: NSPasteboard, writer: (([NSPasteboardWriting]) -> Bool)? = nil) throws {
         let item = NSPasteboardItem()
-        item.setString(text, forType: .string)
-        if let html { item.setString(html, forType: .html) }
+        guard item.setString(text, forType: .string), html.map({ item.setString($0, forType: .html) }) ?? true else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let previous = (pasteboard.pasteboardItems ?? []).map { original in
+            let copy = NSPasteboardItem()
+            for type in original.types {
+                if let data = original.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy
+        }
         pasteboard.clearContents()
-        pasteboard.writeObjects([item])
+        guard writer?([item]) ?? pasteboard.writeObjects([item]) else {
+            pasteboard.clearContents()
+            if !previous.isEmpty { pasteboard.writeObjects(previous) }
+            throw CocoaError(.fileWriteUnknown)
+        }
     }
 }

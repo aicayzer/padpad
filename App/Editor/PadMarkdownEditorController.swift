@@ -36,6 +36,7 @@ final class PadMarkdownEditorController: NSObject {
     var showingLink = false
     var hasExternalMarkedText: () -> Bool = { false }
 
+    @ObservationIgnored var clipboardWriter: (PadClipboardContents) throws -> Void = { try $0.write(to: .general) }
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private var editorURL: URL?
     @ObservationIgnored private var pageReady = false
@@ -400,9 +401,17 @@ final class PadMarkdownEditorController: NSObject {
         case "requestLink":
             showingLink = true
         case "writeClipboard":
-            guard message["generation"] as? Int == generation,
-                  let text = message["text"] as? String, let html = message["html"] as? String else { return }
-            PadClipboardContents(text: text, html: html).write(to: .general)
+            guard let requestID = message["requestId"] as? String else { return }
+            var response: [String: String] = [:]
+            do {
+                guard message["generation"] as? Int == generation,
+                      message["documentId"] as? String == documentID?.uuidString,
+                      let text = message["text"] as? String, let html = message["html"] as? String else {
+                    throw PadMarkdownEditorError.documentChanged
+                }
+                try clipboardWriter(PadClipboardContents(text: text, html: html))
+            } catch { response = ["error": error.localizedDescription] }
+            call("clipboardResponse", json(requestID), json(response))
         case "copy":
             guard let text = message["text"] as? String else { return }
             NSPasteboard.general.clearContents()

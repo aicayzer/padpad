@@ -6,6 +6,30 @@ import WebKit
 @MainActor
 @Suite(.serialized, .opensWindows)
 struct MarkdownBridgeTests {
+    @Test func clipboardAcknowledgmentReportsFailureAndRejectsStaleDocuments() async throws {
+        let editor = PadMarkdownEditorController()
+        let id = UUID()
+        editor.load("Keep this text\n", documentID: id)
+        _ = try await editor.snapshot()
+        var writes = 0
+        editor.clipboardWriter = { _ in writes += 1; throw CocoaError(.fileWriteUnknown) }
+        _ = try await editor.webView.evaluateJavaScript("window.editor.clipboardResponse = (id, value) => { window.clipboardReply = {id, ...value}; }; true")
+        for stale in [false, true] {
+            _ = try await editor.webView.evaluateJavaScript("(() => {const scope = window.editor.snapshot(); window.clipboardReply = null; webkit.messageHandlers.host.postMessage({type:'writeClipboard',requestId:'fixture',generation:scope.generation - \(stale ? 1 : 0),documentId:scope.documentId,text:'Replacement',html:'<p>Replacement</p>'}); return true; })()")
+            var response: [String: Any]?
+            for _ in 0..<100 {
+                response = try await editor.webView.evaluateJavaScript("window.clipboardReply") as? [String: Any]
+                if response != nil { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(response?["id"] as? String == "fixture")
+            #expect(response?["error"] is String)
+        }
+        #expect(writes == 1)
+        #expect(editor.isReady)
+        #expect(try await editor.snapshot() == nil)
+    }
+
     @Test func aRecoverableWarningDoesNotDisableSnapshots() async throws {
         let editor = PadMarkdownEditorController()
         var warnings = 0

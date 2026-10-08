@@ -4,6 +4,17 @@ import Testing
 
 @MainActor
 @Suite struct ClipboardTests {
+    @Test func failedNativeWriteRestoresPreviousRepresentations() throws {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        try PadClipboardContents(text: "Previous", html: "<p>Previous</p>").write(to: board)
+        #expect(throws: CocoaError.self) {
+            try PadClipboardContents(text: "Replacement", html: "<p>Replacement</p>").write(to: board, writer: { _ in false })
+        }
+        #expect(board.string(forType: .string) == "Previous")
+        #expect(board.string(forType: .html) == "<p>Previous</p>")
+    }
+
     @Test func formattedCopyUsesFreshEditorAndSourceCopyRetainsMarkdown() async throws {
         let fixture = try ClipboardFixture()
         defer { fixture.cleanUp() }

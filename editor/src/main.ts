@@ -16,13 +16,36 @@ function post(message: Record<string, unknown>): void {
 const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
 let generation = 0;
-function writeClipboard(output: ClipboardOutput): void {
-  post({
-    type: "writeClipboard",
-    generation,
-    text: output.text,
-    html: output.html,
-    images: [],
+const clipboardReplies = new Map<
+  string,
+  { resolve(): void; reject(error: Error): void }
+>();
+function writeClipboard(output: ClipboardOutput): Promise<void> {
+  const scope = editor.snapshot();
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      clipboardReplies.delete(requestId);
+      reject(new Error("Clipboard write timed out"));
+    }, 15000);
+    clipboardReplies.set(requestId, {
+      resolve() {
+        clearTimeout(timeout);
+        resolve();
+      },
+      reject(error) {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    });
+    post({
+      type: "writeClipboard",
+      requestId,
+      documentId: scope.documentId,
+      generation: scope.generation,
+      text: output.text,
+      html: output.html,
+    });
   });
 }
 const editor = await InkKitEditor.mount(
@@ -48,6 +71,12 @@ const editor = await InkKitEditor.mount(
   {},
 );
 const facade = {
+  clipboardResponse(requestId: string, response: { error?: string }) {
+    const reply = clipboardReplies.get(requestId);
+    clipboardReplies.delete(requestId);
+    if (response.error) reply?.reject(new Error(response.error));
+    else reply?.resolve();
+  },
   load(
     text: string,
     nextGeneration: number,

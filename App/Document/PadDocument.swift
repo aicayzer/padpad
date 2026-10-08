@@ -316,7 +316,7 @@ final class PadDocument {
                 contents = PadClipboardContents(text: text)
             }
             guard documentID == id else { return }
-            contents.write(to: pasteboard)
+            try contents.write(to: pasteboard)
             notice = "Copied"
         } catch {
             self.error = "Couldn’t copy your text. Try again."

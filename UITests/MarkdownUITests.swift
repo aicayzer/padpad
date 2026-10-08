@@ -258,6 +258,69 @@ final class MarkdownUITests: XCTestCase {
         }
     }
 
+    func testPasteAsPlainTextKeepsMarkdownCharactersLiteral() throws {
+        let restore = restoreClipboardAfterTest()
+        defer { restore() }
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("**literal** & `code`", forType: .string)
+        app.typeKey("v", modifierFlags: [.command, .option, .shift])
+        let saved = try saveAs(app, directory: directory)
+        let source = try String(contentsOf: saved, encoding: .utf8)
+        XCTAssertTrue(source.contains("\\*\\*literal\\*\\*"), source)
+        XCTAssertTrue(source.contains("\\`code\\`"), source)
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        waitForClipboard("**literal** & `code`")
+        XCTAssertFalse(NSPasteboard.general.string(forType: .html)?.contains("<strong>") == true)
+    }
+
+    func testTableMenuCreatesEditableCellsAndSavesTheirStructure() throws {
+        let restore = restoreClipboardAfterTest()
+        defer { restore() }
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        app.dialogs.firstMatch.menuButtons["formattingMenu"].firstMatch.click()
+        app.menuItems["Table"].firstMatch.click()
+        app.menuItems["Insert Table"].firstMatch.click()
+        app.typeText("Name")
+        app.typeKey(.tab, modifierFlags: [])
+        app.typeText("Value")
+        app.typeKey(.tab, modifierFlags: [])
+        app.typeText("Alice")
+        app.typeKey(.tab, modifierFlags: [])
+        app.typeText("42")
+        let saved = try saveAs(app, directory: directory)
+        let source = try String(contentsOf: saved, encoding: .utf8)
+        XCTAssertTrue(source.contains("Name") && source.contains("Value"), source)
+        XCTAssertTrue(source.range(of: #"\|\s*Alice\s*\|\s*42\s*\|"#, options: .regularExpression) != nil, source)
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        let richTable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            NSPasteboard.general.string(forType: .html)?.contains("<table") == true
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [richTable], timeout: 5), .completed)
+    }
+
+    private func restoreClipboardAfterTest() -> () -> Void {
+        let previous = (NSPasteboard.general.pasteboardItems ?? []).map { original in
+            let copy = NSPasteboardItem()
+            for type in original.types {
+                if let data = original.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy
+        }
+        return {
+            NSPasteboard.general.clearContents()
+            if !previous.isEmpty { NSPasteboard.general.writeObjects(previous) }
+        }
+    }
+
     func testCopyAndCopyAllKeepReadableCharactersFormattingAndSelection() throws {
         let previous = (NSPasteboard.general.pasteboardItems ?? []).map { original in
             let copy = NSPasteboardItem()

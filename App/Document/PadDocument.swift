@@ -295,6 +295,12 @@ final class PadDocument {
         return true
     }
 
+    func pasteAsPlainText() {
+        guard let value = NSPasteboard.general.string(forType: .string), !isBusy else { return }
+        if currentFormat == .md { markdownEditor?.pasteAsPlainText(value) }
+        else { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
+    }
+
     func copyAllContents(asMarkdown: Bool = false, to pasteboard: NSPasteboard = .general) async {
         guard !isBusy, !onboarding.isPresented else { return }
         operation = .transition

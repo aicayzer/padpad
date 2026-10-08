@@ -6,6 +6,22 @@ import WebKit
 @MainActor
 @Suite(.serialized, .opensWindows)
 struct MarkdownBridgeTests {
+    @Test func aRecoverableWarningDoesNotDisableSnapshots() async throws {
+        let editor = PadMarkdownEditorController()
+        var warnings = 0
+        editor.onError = { _ in warnings += 1 }
+        editor.load("Keep this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        _ = try await editor.webView.evaluateJavaScript("webkit.messageHandlers.host.postMessage({type:'editorWarning',message:'The pasted image is unavailable.'}); true")
+        for _ in 0..<100 {
+            if warnings == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(warnings == 1)
+        #expect(editor.isReady)
+        #expect(try await editor.snapshot() == nil)
+    }
+
     @Test func toolbarStateIncludesHeadingListsAndQuotesAndRepeatedHeadingReturnsToBody() async throws {
         let editor = PadMarkdownEditorController()
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 500, height: 400),

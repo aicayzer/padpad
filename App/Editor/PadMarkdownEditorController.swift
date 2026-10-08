@@ -8,7 +8,7 @@ enum PadMarkdownFormatCommand: String {
 
 enum PadMarkdownEditorError: LocalizedError {
     case notReady, documentChanged, invalidResponse, unavailable, composing
-    case script(String)
+    case script(String), warning(String)
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +18,7 @@ enum PadMarkdownEditorError: LocalizedError {
         case .invalidResponse: "Couldn’t read your text. Try again."
         case .unavailable: "The editor is unavailable. Your text is still open."
         case .script: "The editor couldn’t complete that action. Your text is still open."
+        case .warning(let message): message
         }
     }
 }
@@ -117,7 +118,7 @@ final class PadMarkdownEditorController: NSObject {
         self.pendingLoad = nil
         let expectedGeneration = generation
         let function = pendingLoad.reload ? "reload" : "load"
-        let script = "window.editor.\(function)(\(json(pendingLoad.markdown)), \(expectedGeneration))"
+        let script = "window.editor.\(function)(\(json(pendingLoad.markdown)), \(expectedGeneration), \(json(documentID?.uuidString ?? "")))"
         loadTask = Task { @MainActor [weak self] in
             guard let self else { throw PadMarkdownEditorError.unavailable }
             do {
@@ -156,18 +157,22 @@ final class PadMarkdownEditorController: NSObject {
         if let focusTask { try await focusTask.value }
         guard !inputBuffer.isComposing, !hasExternalMarkedText() else { throw PadMarkdownEditorError.composing }
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
-        let result = try await webView.evaluateJavaScript("window.editor.markdown()")
+        let result = try await webView.evaluateJavaScript("window.editor.snapshot(\(expectedGeneration))")
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
-        if result == nil || result is NSNull { return nil }
-        guard let markdown = result as? String else { throw PadMarkdownEditorError.invalidResponse }
-        return markdown
+        guard let payload = result as? [String: Any],
+              payload["generation"] as? Int == expectedGeneration,
+              payload["documentId"] as? String == documentID?.uuidString,
+              let markdown = payload["text"] as? String,
+              payload["format"] as? String == "md", payload["revision"] is Int,
+              let dirty = payload["dirty"] as? Bool else { throw PadMarkdownEditorError.invalidResponse }
+        return dirty ? markdown : nil
     }
 
     func clipboardSnapshot() async throws -> PadClipboardContents {
         let expectedGeneration = generation
         _ = try await snapshot()
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
-        let result = try await webView.evaluateJavaScript("window.editor.clipboard()")
+        let result = try await webView.callAsyncJavaScript("return await window.editor.clipboard()", arguments: [:], in: nil, contentWorld: .page)
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
         guard let payload = result as? [String: Any],
               let text = payload["text"] as? String,
@@ -303,6 +308,18 @@ final class PadMarkdownEditorController: NSObject {
         }
     }
 
+    func table(_ command: String) {
+        guard isReady else { return }
+        call("table", json(command))
+        focus()
+    }
+
+    func pasteAsPlainText(_ text: String) {
+        guard isReady else { return }
+        call("pasteAsPlainText", json(text))
+        focus()
+    }
+
     func format(_ command: PadMarkdownFormatCommand, argument: String? = nil) {
         guard isReady else { return }
         call("format", json(command.rawValue), argument.map { json($0) } ?? "null")
@@ -382,10 +399,16 @@ final class PadMarkdownEditorController: NSObject {
             NSWorkspace.shared.open(url)
         case "requestLink":
             showingLink = true
+        case "writeClipboard":
+            guard message["generation"] as? Int == generation,
+                  let text = message["text"] as? String, let html = message["html"] as? String else { return }
+            PadClipboardContents(text: text, html: html).write(to: .general)
         case "copy":
             guard let text = message["text"] as? String else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+        case "editorWarning":
+            onError(PadMarkdownEditorError.warning(message["message"] as? String ?? "The editor couldn’t complete that action."))
         case "error":
             report(PadMarkdownEditorError.script(message["message"] as? String ?? "Unknown error"))
         default: break

@@ -123,6 +123,7 @@ final class PadMarkdownEditorController: NSObject {
         loadTask = Task { @MainActor [weak self] in
             guard let self else { throw PadMarkdownEditorError.unavailable }
             do {
+                guard self.generation == expectedGeneration else { throw PadMarkdownEditorError.documentChanged }
                 _ = try await self.webView.evaluateJavaScript(script)
                 guard self.generation == expectedGeneration else { throw PadMarkdownEditorError.documentChanged }
                 self.failure = nil

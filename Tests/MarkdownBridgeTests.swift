@@ -6,6 +6,19 @@ import WebKit
 @MainActor
 @Suite(.serialized, .opensWindows)
 struct MarkdownBridgeTests {
+    @Test func queuedReplacementLoadsApplyOnlyTheLatestDocument() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Initial\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        _ = try await editor.webView.evaluateJavaScript("window.receivedLoads = []; const originalLoad = window.editor.load; window.editor.load = (...args) => {window.receivedLoads.push(args[0]); return originalLoad(...args)}; true")
+        for index in 0..<20 { editor.load("Document \(index)\n", documentID: UUID()) }
+        #expect(try await editor.snapshot() == nil)
+        let calls = try await editor.webView.evaluateJavaScript("window.receivedLoads") as? [String]
+        #expect(calls == ["Document 19\n"])
+        let source = try await editor.webView.evaluateJavaScript("window.editor.snapshot().text") as? String
+        #expect(source == "Document 19\n")
+    }
+
     @Test func clipboardAcknowledgmentReportsFailureAndRejectsStaleDocuments() async throws {
         let editor = PadMarkdownEditorController()
         let id = UUID()

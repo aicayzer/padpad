@@ -36,6 +36,16 @@ enum PadMarkdownEditorError: LocalizedError {
 @Observable
 final class PadMarkdownEditorController: NSObject {
     private(set) var isReady = false
+    private(set) var editingMode = "formatted"
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    private(set) var canReplace = false
+    private(set) var formatAvailability: [String: Bool] = [:]
+    private(set) var tableAvailability: [String: Bool] = [:]
+    var showingFind = false
+    var searchText = ""
+    var replacementText = ""
+    @ObservationIgnored private var printRenderer: PadPrintRenderer?
     private(set) var activeMarks: Set<String> = []
     var onChanged: (String, UUID) -> Void = { _, _ in }
     var onError: (any Error) -> Void = { _ in }
@@ -112,6 +122,12 @@ final class PadMarkdownEditorController: NSObject {
         generation += 1
         self.documentID = documentID
         activeMarks = []
+        canUndo = false
+        canRedo = false
+        canReplace = false
+        formatAvailability = [:]
+        tableAvailability = [:]
+        showingFind = false
         pendingEvents.removeAll()
         inputBuffer.discardEvents()
         focusTask?.cancel()
@@ -330,8 +346,42 @@ final class PadMarkdownEditorController: NSObject {
         }
     }
 
-    func table(_ command: String) {
+    func setEditingMode(_ mode: String) {
         guard isReady else { return }
+        call("setEditingMode", json(mode), json(generation))
+    }
+
+    func undo() { guard canUndo else { return }; call("undo", json(generation)) }
+    func redo() { guard canRedo else { return }; call("redo", json(generation)) }
+    func find() { guard isReady else { return }; call("find", json(searchText), json(generation)) }
+    func replace(all: Bool) {
+        guard canReplace, !searchText.isEmpty else { return }
+        call(all ? "replaceAll" : "replace", json(searchText), json(replacementText), json(generation))
+    }
+
+    func printDocument() async throws {
+        guard printRenderer == nil else { return }
+        let expectedGeneration = generation
+        _ = try await snapshot()
+        let result = try await webView.callAsyncJavaScript("return await window.editor.printable(generation)",
+            arguments: ["generation": expectedGeneration], in: nil, contentWorld: .page)
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        guard let payload = result as? [String: Any],
+              payload["generation"] as? Int == expectedGeneration,
+              payload["documentId"] as? String == documentID?.uuidString,
+              payload["revision"] is Int, payload["format"] as? String == "md",
+              let html = payload["html"] as? String, payload["styles"] is String,
+              payload["assets"] is [Any], payload["warnings"] is [Any] else {
+            throw PadMarkdownEditorError.invalidResponse
+        }
+        let renderer = PadPrintRenderer()
+        printRenderer = renderer
+        defer { printRenderer = nil }
+        try await renderer.printHTML(html)
+    }
+
+    func table(_ command: String) {
+        guard isReady, tableAvailability[command] == true else { return }
         call("table", json(command))
         focus()
     }
@@ -343,7 +393,7 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func format(_ command: PadMarkdownFormatCommand, argument: String? = nil) {
-        guard isReady else { return }
+        guard isReady, formatAvailability[command.rawValue] == true else { return }
         call("format", json(command.rawValue), argument.map { json($0) } ?? "null")
         focus()
     }
@@ -404,6 +454,17 @@ final class PadMarkdownEditorController: NSObject {
             guard let receivedGeneration = message["generation"] as? Int, receivedGeneration == generation,
                   let markdown = message["markdown"] as? String, let documentID else { return }
             onChanged(markdown, documentID)
+        case "commands":
+            guard message["generation"] as? Int == generation,
+                  message["documentId"] as? String == documentID?.uuidString,
+                  let commands = message["commands"] as? [String: Any],
+                  let mode = message["mode"] as? String else { return }
+            editingMode = mode
+            canUndo = commands["undo"] as? Bool ?? false
+            canRedo = commands["redo"] as? Bool ?? false
+            canReplace = commands["replace"] as? Bool ?? false
+            formatAvailability = commands["format"] as? [String: Bool] ?? [:]
+            tableAvailability = commands["table"] as? [String: Bool] ?? [:]
         case "state":
             guard isReady else { return }
             if let receivedGeneration = message["generation"] as? Int, receivedGeneration != generation { return }
@@ -482,5 +543,48 @@ private final class PadMarkdownWebView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { onAttach() }
+    }
+}
+
+@MainActor
+private final class PadPrintRenderer: NSObject, WKNavigationDelegate {
+    private let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
+    private var continuation: CheckedContinuation<Void, any Error>?
+    private var timeout: Task<Void, Never>?
+
+    func printHTML(_ html: String) async throws {
+        view.navigationDelegate = self
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            timeout = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                self?.view.stopLoading()
+                self?.finish(PadMarkdownEditorError.notReady)
+            }
+            view.loadHTMLString(html, baseURL: nil)
+        }
+        _ = try await view.callAsyncJavaScript("""
+            await Promise.race([
+                Promise.all([document.fonts.ready, ...Array.from(document.images, image => image.decode())]),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Print assets timed out")), 15000))
+            ]);
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        let operation = view.printOperation(with: NSPrintInfo.shared.copy() as! NSPrintInfo)
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.run()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(nil) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { finish(error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { finish(error) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish(PadMarkdownEditorError.unavailable) }
+    private func finish(_ error: (any Error)?) {
+        timeout?.cancel()
+        timeout = nil
+        let pending = continuation
+        continuation = nil
+        if let error { pending?.resume(throwing: error) } else { pending?.resume() }
     }
 }

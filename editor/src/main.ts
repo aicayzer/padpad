@@ -58,6 +58,9 @@ const editor = await InkKitEditor.mount(
     changed(markdown, generation) {
       post({ type: "changed", markdown, generation });
     },
+    commandStateChanged(state) {
+      post({ type: "commands", ...state });
+    },
     stateChanged(state) {
       post({ type: "state", ...state, generation });
     },
@@ -107,6 +110,13 @@ const facade = {
     }
   },
   clipboard: () => editor.clipboardSnapshot(true),
+  setEditingMode: editor.setEditingMode.bind(editor),
+  undo: editor.undo.bind(editor),
+  redo: editor.redo.bind(editor),
+  replace: editor.replace.bind(editor),
+  replaceAll: editor.replaceAll.bind(editor),
+  printable: (expectedGeneration: number) =>
+    editor.printableSnapshot(expectedGeneration),
   format: editor.format.bind(editor),
   focus: editor.focus.bind(editor),
   find: editor.find.bind(editor),
@@ -139,7 +149,8 @@ window.addEventListener("keydown", (event) => {
     event.metaKey &&
     !event.altKey &&
     !event.ctrlKey &&
-    event.key.toLowerCase() === "k"
+    event.key.toLowerCase() === "k" &&
+    editor.commandState().commands.format.link
   ) {
     event.preventDefault();
     post({ type: "requestLink" });

@@ -17,6 +17,8 @@ struct PadPlainTextEditorView: NSViewRepresentable {
         editor.isRichText = false
         editor.importsGraphics = false
         editor.allowsUndo = true
+        editor.usesFindBar = true
+        editor.isIncrementalSearchingEnabled = true
         editor.drawsBackground = false
         editor.font = .systemFont(ofSize: 15)
         editor.textColor = .textColor

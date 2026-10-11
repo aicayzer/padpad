@@ -30,7 +30,7 @@ struct PadMarkdownToolbar: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .controlSize(.small)
-        .disabled(!editor.isReady)
+        .disabled(!editor.isReady || editor.editingMode != "formatted")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Markdown formatting")
         .accessibilityIdentifier("markdownFormatting")
@@ -66,7 +66,7 @@ struct PadMarkdownToolbar: View {
                 Toggle("Heading \(level)", isOn: Binding(
                     get: { editor.activeMarks.contains("heading\(level)") },
                     set: { _ in editor.format(.heading, argument: String(level)) }
-                ))
+                )).disabled(editor.formatAvailability["heading"] != true)
             }
         }
     }
@@ -102,25 +102,25 @@ struct PadMarkdownToolbar: View {
             Menu("Headings") { headingCommands }
             Menu("Text style") { styleCommands }
             Divider()
-            Button("Link") { editor.showingLink = true }
+            Button("Link") { editor.showingLink = true }.disabled(editor.formatAvailability["link"] != true)
             formatToggle("Inline code", command: .code)
             formatToggle("Code block", command: .codeBlock)
             formatToggle("Quote", command: .quote)
             Divider()
             Menu("Lists") { listCommands }
             Menu("Table") {
-                Button("Insert Table") { editor.table("insert") }
-                Button("Add Row Before") { editor.table("addRowBefore") }
-                Button("Add Row After") { editor.table("addRowAfter") }
-                Button("Add Column Before") { editor.table("addColumnBefore") }
-                Button("Add Column After") { editor.table("addColumnAfter") }
-                Button("Delete Row") { editor.table("deleteRow") }
-                Button("Delete Column") { editor.table("deleteColumn") }
-                Button("Delete Table") { editor.table("deleteTable") }
-                Button("Align Left") { editor.table("alignLeft") }
-                Button("Align Center") { editor.table("alignCenter") }
-                Button("Align Right") { editor.table("alignRight") }
-                Button("Exit Table") { editor.table("exit") }
+                Button("Insert Table") { editor.table("insert") }.disabled(editor.tableAvailability["insert"] != true)
+                Button("Add Row Before") { editor.table("addRowBefore") }.disabled(editor.tableAvailability["addRowBefore"] != true)
+                Button("Add Row After") { editor.table("addRowAfter") }.disabled(editor.tableAvailability["addRowAfter"] != true)
+                Button("Add Column Before") { editor.table("addColumnBefore") }.disabled(editor.tableAvailability["addColumnBefore"] != true)
+                Button("Add Column After") { editor.table("addColumnAfter") }.disabled(editor.tableAvailability["addColumnAfter"] != true)
+                Button("Delete Row") { editor.table("deleteRow") }.disabled(editor.tableAvailability["deleteRow"] != true)
+                Button("Delete Column") { editor.table("deleteColumn") }.disabled(editor.tableAvailability["deleteColumn"] != true)
+                Button("Delete Table") { editor.table("deleteTable") }.disabled(editor.tableAvailability["deleteTable"] != true)
+                Button("Align Left") { editor.table("alignLeft") }.disabled(editor.tableAvailability["alignLeft"] != true)
+                Button("Align Center") { editor.table("alignCenter") }.disabled(editor.tableAvailability["alignCenter"] != true)
+                Button("Align Right") { editor.table("alignRight") }.disabled(editor.tableAvailability["alignRight"] != true)
+                Button("Exit Table") { editor.table("exit") }.disabled(editor.tableAvailability["exit"] != true)
             }
         }
     }
@@ -143,6 +143,7 @@ struct PadMarkdownToolbar: View {
 
     private func formatToggle(_ title: String, command: PadMarkdownFormatCommand) -> some View {
         Toggle(title, isOn: Binding(get: { active(command) }, set: { _ in editor.format(command) }))
+            .disabled(editor.formatAvailability[command.rawValue] != true)
     }
 
     private func formatButton(_ title: String, image: String, command: PadMarkdownFormatCommand, size: CGFloat = 14) -> some View {
@@ -267,4 +268,20 @@ struct PadMarkdownLinkPresenter: ViewModifier {
         editor.showingLink = false
     }
 
+}
+
+struct PadMarkdownFindBar: View {
+    @Bindable var editor: PadMarkdownEditorController
+    var body: some View {
+        HStack {
+            TextField("Find", text: $editor.searchText).onSubmit { editor.find() }
+            TextField("Replace", text: $editor.replacementText)
+            Button("Next") { editor.find() }.disabled(editor.searchText.isEmpty)
+            Button("Replace") { editor.replace(all: false) }.disabled(!editor.canReplace || editor.searchText.isEmpty)
+            Button("Replace All") { editor.replace(all: true) }.disabled(!editor.canReplace || editor.searchText.isEmpty)
+            Button("Done") { editor.showingFind = false; editor.focus() }
+        }
+        .textFieldStyle(.roundedBorder)
+        .padding(8)
+    }
 }

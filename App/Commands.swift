@@ -1,9 +1,20 @@
+import AppKit
 import SwiftUI
 
 struct AppCommands: Commands {
     let workspace: PadWorkspace
     private var document: PadDocument { workspace.activeDocument }
     private var canEdit: Bool { document.isActive && !document.isBusy && !workspace.isTransitioning && !document.onboarding.isPresented }
+
+    private var markdownOwnsUndo: Bool {
+        document.currentFormat == .md && document.markdownEditor?.ownsFirstResponder == true
+    }
+    private var canUndo: Bool {
+        markdownOwnsUndo ? document.markdownEditor?.canUndo == true : NSApp.keyWindow?.firstResponder?.undoManager?.canUndo == true
+    }
+    private var canRedo: Bool {
+        markdownOwnsUndo ? document.markdownEditor?.canRedo == true : NSApp.keyWindow?.firstResponder?.undoManager?.canRedo == true
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -29,7 +40,29 @@ struct AppCommands: Commands {
                 Button("Reveal in Finder") { document.revealInFinder() }.disabled(!canEdit)
             }
         }
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") {
+                if markdownOwnsUndo { document.markdownEditor?.undo() }
+                else { NSApp.keyWindow?.firstResponder?.undoManager?.undo() }
+            }.keyboardShortcut("z").disabled(!canEdit || !canUndo)
+            Button("Redo") {
+                if markdownOwnsUndo { document.markdownEditor?.redo() }
+                else { NSApp.keyWindow?.firstResponder?.undoManager?.redo() }
+            }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!canEdit || !canRedo)
+        }
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { Task { await document.printDocument() } }
+                .keyboardShortcut("p").disabled(!canEdit)
+        }
         CommandGroup(after: .pasteboard) {
+            Button("Find and Replace…") {
+                if document.currentFormat == .md { document.markdownEditor?.showingFind = true }
+                else {
+                    let item = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
+                    item.tag = NSTextFinder.Action.showFindInterface.rawValue
+                    NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: item)
+                }
+            }.keyboardShortcut("f").disabled(!canEdit)
             Button("Paste as Plain Text") { document.pasteAsPlainText() }
                 .keyboardShortcut("v", modifiers: [.command, .option, .shift])
                 .disabled(!canEdit)
@@ -41,6 +74,10 @@ struct AppCommands: Commands {
         }
         CommandMenu("Format") {
             if document.currentFormat == .md, let editor = document.markdownEditor {
+                Toggle("Markdown Source", isOn: Binding(get: { editor.editingMode == "source" },
+                    set: { editor.setEditingMode($0 ? "source" : "formatted") }))
+                    .disabled(!canEdit || !editor.isReady)
+                Divider()
                 PadMarkdownToolbar(editor: editor).menuCommands
                     .disabled(!canEdit || !editor.isReady)
             }

@@ -228,6 +228,31 @@ final class PadDocument {
         (try? PadFilename.name(parts: nameParts, format: format, number: nextNumber)) ?? "Invalid filename"
     }
 
+    func printDocument() async {
+        let id = documentID
+        guard !isBusy else { return }
+        operation = .transition
+        defer { operation = nil }
+        guard await captureLatestEditor(), documentID == id else { return }
+        do {
+            if currentFormat == .md {
+                guard let editor = markdownEditor else { throw PadMarkdownEditorError.notReady }
+                try await editor.printDocument()
+            } else {
+                let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 720))
+                view.string = text
+                view.font = .systemFont(ofSize: 12)
+                view.isHorizontallyResizable = false
+                view.isVerticallyResizable = true
+                view.textContainer?.widthTracksTextView = true
+                view.sizeToFit()
+                let operation = NSPrintOperation(view: view)
+                operation.showsPrintPanel = true
+                operation.run()
+            }
+        } catch { self.error = readableError(error, fallback: "Couldn’t print your text. Try again.") }
+    }
+
     func mountMarkdownEditor() {
         guard !onboarding.isPresented, currentFormat == .md, markdownEditor == nil else { return }
         let editor = PadMarkdownEditorController()

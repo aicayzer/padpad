@@ -239,13 +239,7 @@ final class PadDocument {
                 guard let editor = markdownEditor else { throw PadMarkdownEditorError.notReady }
                 try await editor.printDocument()
             } else {
-                let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 720))
-                view.string = text
-                view.font = .systemFont(ofSize: 12)
-                view.isHorizontallyResizable = false
-                view.isVerticallyResizable = true
-                view.textContainer?.widthTracksTextView = true
-                view.sizeToFit()
+                let view = PadPlainTextPrintView.make(text)
                 let operation = NSPrintOperation(view: view)
                 operation.showsPrintPanel = true
                 operation.run()
@@ -1200,5 +1194,21 @@ private final class PadSharePickerDelegate: NSObject, NSSharingServicePickerDele
 
     func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
         onDismiss()
+    }
+}
+
+@MainActor
+enum PadPlainTextPrintView {
+    static func make(_ text: String) -> NSTextView {
+        let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 1))
+        view.minSize = .zero
+        view.maxSize = NSSize(width: 540, height: .greatestFiniteMagnitude)
+        view.isHorizontallyResizable = false
+        view.isVerticallyResizable = true
+        view.textContainer?.widthTracksTextView = true
+        view.string = text
+        view.font = .systemFont(ofSize: 12)
+        view.sizeToFit()
+        return view
     }
 }

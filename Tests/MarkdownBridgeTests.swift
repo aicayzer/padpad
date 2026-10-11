@@ -42,6 +42,28 @@ struct MarkdownBridgeTests {
         #expect(clipboard.html?.contains("<h2") == true)
     }
 
+    @Test func nativeTextPrintUsesContentHeight() throws {
+        for long in [false, true] {
+            let text = "PLAIN HEADING\n\n**literal markers**\n\n"
+                + (long ? (0..<160).map { "Paragraph \($0) contains plain writing.\n\n" }.joined() : "")
+                + "PLAIN FINAL TAIL\n"
+            let url = FileManager.default.temporaryDirectory.appending(path: "pad-text-print-\(UUID().uuidString).pdf")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+            info.jobDisposition = .save
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+            let operation = NSPrintOperation(view: PadPlainTextPrintView.make(text), printInfo: info)
+            operation.showsPrintPanel = false
+            operation.showsProgressPanel = false
+            #expect(operation.run())
+            let pdf = try #require(PDFDocument(url: url))
+            #expect(long ? pdf.pageCount > 1 : pdf.pageCount == 1)
+            #expect(pdf.string?.contains("PLAIN HEADING") == true)
+            #expect(pdf.string?.contains("**literal markers**") == true)
+            #expect(pdf.string?.contains("PLAIN FINAL TAIL") == true)
+        }
+    }
+
     @Test func nativePrintExportsCompleteFrozenPDF() async throws {
         let editor = PadMarkdownEditorController()
         let text = "# PRINT HEADING\n\n**Bold body**\n\n| Name | Value |\n| --- | --- |\n| Table cell | 42 |\n\n"

@@ -41,6 +41,18 @@ struct MarkdownBridgeTests {
         #expect(clipboard.html?.contains("<h2") == true)
     }
 
+    @Test func staleCommandsRetainLaterSnapshots() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Keep this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        for script in ["window.editor.setEditingMode('source', -1)", "window.editor.find('text', -1)", "window.editor.replaceAll('text', 'lost', -1)", "window.editor.undo(-1)"] {
+            let result = try await editor.webView.evaluateJavaScript(script) as? [String: Any]
+            #expect(result?["commandError"] as? String == "stale-document")
+        }
+        #expect(editor.isReady)
+        #expect(try await editor.snapshot() == nil)
+    }
+
     @Test func unknownSnapshotFailureStillDisablesTheBridge() async throws {
         let editor = PadMarkdownEditorController()
         editor.load("Retain this text\n", documentID: UUID())

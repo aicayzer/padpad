@@ -77,6 +77,29 @@ const editor = await InkKitEditor.mount(
   },
   {},
 );
+function guardedCommand<T>(
+  action: () => T,
+): T | { commandError: string; message: string } {
+  try {
+    return action();
+  } catch (error) {
+    if (
+      error instanceof InkKitError &&
+      [
+        "not-ready",
+        "stale-document",
+        "composition",
+        "operation-pending",
+        "preservation",
+        "image-unavailable",
+        "diagram-unavailable",
+      ].includes(error.code)
+    )
+      return { commandError: error.code, message: error.message };
+    throw error;
+  }
+}
+
 const facade = {
   clipboardResponse(requestId: string, response: { error?: string }) {
     const reply = clipboardReplies.get(requestId);
@@ -110,16 +133,27 @@ const facade = {
     }
   },
   clipboard: () => editor.clipboardSnapshot(true),
-  setEditingMode: editor.setEditingMode.bind(editor),
-  undo: editor.undo.bind(editor),
-  redo: editor.redo.bind(editor),
-  replace: editor.replace.bind(editor),
-  replaceAll: editor.replaceAll.bind(editor),
-  printable: (expectedGeneration: number) =>
-    editor.printableSnapshot(expectedGeneration),
+  setEditingMode: (mode: "source" | "formatted", expected: number) =>
+    guardedCommand(() => editor.setEditingMode(mode, expected)),
+  undo: (expected: number) => guardedCommand(() => editor.undo(expected)),
+  redo: (expected: number) => guardedCommand(() => editor.redo(expected)),
+  replace: (search: string, replacement: string, expected: number) =>
+    guardedCommand(() => editor.replace(search, replacement, expected)),
+  replaceAll: (search: string, replacement: string, expected: number) =>
+    guardedCommand(() => editor.replaceAll(search, replacement, expected)),
+  async printable(expectedGeneration: number) {
+    try {
+      return await editor.printableSnapshot(expectedGeneration);
+    } catch (error) {
+      if (error instanceof InkKitError)
+        return { snapshotError: error.code, message: error.message };
+      throw error;
+    }
+  },
   format: editor.format.bind(editor),
   focus: editor.focus.bind(editor),
-  find: editor.find.bind(editor),
+  find: (search: string, expected: number) =>
+    guardedCommand(() => editor.find(search, expected)),
   insertText: editor.insertText.bind(editor),
   keyDown: editor.keyDown.bind(editor),
   insertPaths: editor.insertPaths.bind(editor),

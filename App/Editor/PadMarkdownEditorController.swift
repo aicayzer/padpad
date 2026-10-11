@@ -366,10 +366,13 @@ final class PadMarkdownEditorController: NSObject {
         let result = try await webView.callAsyncJavaScript("return await window.editor.printable(generation)",
             arguments: ["generation": expectedGeneration], in: nil, contentWorld: .page)
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        if let payload = result as? [String: Any], let code = payload["snapshotError"] as? String {
+            throw PadMarkdownEditorError.snapshotRejected(code: code, message: payload["message"] as? String ?? "Couldn’t prepare printing.")
+        }
         guard let payload = result as? [String: Any],
               payload["generation"] as? Int == expectedGeneration,
               payload["documentId"] as? String == documentID?.uuidString,
-              payload["revision"] is Int, payload["format"] as? String == "md",
+              let revision = payload["revision"] as? Int, payload["format"] as? String == "md",
               let html = payload["html"] as? String, payload["styles"] is String,
               payload["assets"] is [Any], payload["warnings"] is [Any] else {
             throw PadMarkdownEditorError.invalidResponse
@@ -377,7 +380,15 @@ final class PadMarkdownEditorController: NSObject {
         let renderer = PadPrintRenderer()
         printRenderer = renderer
         defer { printRenderer = nil }
-        try await renderer.printHTML(html)
+        try await renderer.loadHTML(html)
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        let current = try await webView.evaluateJavaScript("window.editor.snapshot(\(expectedGeneration))") as? [String: Any]
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        try PadPrintScope(documentID: documentID?.uuidString ?? "", generation: expectedGeneration, revision: revision).validate(current)
+        if let warnings = payload["warnings"] as? [[String: Any]], !warnings.isEmpty {
+            onError(PadMarkdownEditorError.warning(warnings.compactMap { $0["message"] as? String }.joined(separator: "\n")))
+        }
+        renderer.printDocument()
     }
 
     func table(_ command: String) {
@@ -400,9 +411,11 @@ final class PadMarkdownEditorController: NSObject {
 
     private func call(_ function: String, _ arguments: String...) {
         let expectedGeneration = generation
-        webView.evaluateJavaScript("window.editor.\(function)(\(arguments.joined(separator: ",")))") { [weak self] _, error in
-            guard let self, expectedGeneration == self.generation, let error else { return }
-            self.report(error)
+        webView.evaluateJavaScript("window.editor.\(function)(\(arguments.joined(separator: ",")))") { [weak self] result, error in
+            guard let self, expectedGeneration == self.generation else { return }
+            if let payload = result as? [String: Any], let code = payload["commandError"] as? String {
+                self.onError(PadMarkdownEditorError.snapshotRejected(code: code, message: payload["message"] as? String ?? "Try again."))
+            } else if let error { self.report(error) }
         }
     }
 
@@ -552,7 +565,7 @@ private final class PadPrintRenderer: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Void, any Error>?
     private var timeout: Task<Void, Never>?
 
-    func printHTML(_ html: String) async throws {
+    func loadHTML(_ html: String) async throws {
         view.navigationDelegate = self
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
@@ -570,7 +583,12 @@ private final class PadPrintRenderer: NSObject, WKNavigationDelegate {
             ]);
             return true;
             """, arguments: [:], in: nil, contentWorld: .page)
-        let operation = view.printOperation(with: NSPrintInfo.shared.copy() as! NSPrintInfo)
+    }
+
+    func printDocument() {
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.horizontalPagination = .fit
+        let operation = view.printOperation(with: info)
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         operation.run()
@@ -586,5 +604,17 @@ private final class PadPrintRenderer: NSObject, WKNavigationDelegate {
         let pending = continuation
         continuation = nil
         if let error { pending?.resume(throwing: error) } else { pending?.resume() }
+    }
+}
+
+struct PadPrintScope {
+    let documentID: String
+    let generation: Int
+    let revision: Int
+
+    func validate(_ current: [String: Any]?) throws {
+        guard current?["generation"] as? Int == generation,
+              current?["documentId"] as? String == documentID,
+              current?["revision"] as? Int == revision else { throw PadMarkdownEditorError.documentChanged }
     }
 }

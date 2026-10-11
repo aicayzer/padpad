@@ -42,7 +42,17 @@ final class PadMarkdownEditorController: NSObject {
     private(set) var canReplace = false
     private(set) var formatAvailability: [String: Bool] = [:]
     private(set) var tableAvailability: [String: Bool] = [:]
-    var showingFind = false
+    var showingFind = false {
+        didSet {
+            if showingFind {
+                if oldValue, let content = webView.window?.contentView, let field = findField(in: content) {
+                    webView.window?.makeFirstResponder(field)
+                    field.selectText(nil)
+                } else { webView.window?.makeFirstResponder(findInputResponder) }
+            } else { findInputResponder.discardEvents() }
+        }
+    }
+    @ObservationIgnored private let findInputResponder = OverlayInputResponder()
     var searchText = ""
     var replacementText = ""
     @ObservationIgnored private var printRenderer: PadPrintRenderer?
@@ -257,7 +267,7 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func capturePendingInput(_ event: NSEvent) -> Bool {
-        guard (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
+        guard !showingFind, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
               let window = webView.window else { return false }
         // A mounted WebKit view can receive keys before its editable DOM has focus.
         inputBuffer.attach(to: window)
@@ -346,6 +356,14 @@ final class PadMarkdownEditorController: NSObject {
         }
     }
 
+    private func findField(in view: NSView) -> OverlayTextField? {
+        if let field = view as? OverlayTextField, field.placeholderString == "Find" { return field }
+        for child in view.subviews {
+            if let field = findField(in: child) { return field }
+        }
+        return nil
+    }
+
     func setEditingMode(_ mode: String) {
         guard isReady else { return }
         call("setEditingMode", json(mode), json(generation))
@@ -374,7 +392,7 @@ final class PadMarkdownEditorController: NSObject {
               payload["documentId"] as? String == documentID?.uuidString,
               let revision = payload["revision"] as? Int, payload["format"] as? String == "md",
               let html = payload["html"] as? String, payload["styles"] is String,
-              payload["assets"] is [Any], payload["warnings"] is [Any] else {
+              payload["assetCount"] is Int, payload["warnings"] is [Any] else {
             throw PadMarkdownEditorError.invalidResponse
         }
         let renderer = PadPrintRenderer()
@@ -388,7 +406,8 @@ final class PadMarkdownEditorController: NSObject {
         if let warnings = payload["warnings"] as? [[String: Any]], !warnings.isEmpty {
             onError(PadMarkdownEditorError.warning(warnings.compactMap { $0["message"] as? String }.joined(separator: "\n")))
         }
-        renderer.printDocument()
+        guard let window = webView.window else { throw PadMarkdownEditorError.documentChanged }
+        _ = await renderer.printDocument(in: window)
     }
 
     func table(_ command: String) {
@@ -560,12 +579,22 @@ private final class PadMarkdownWebView: WKWebView {
 }
 
 @MainActor
-private final class PadPrintRenderer: NSObject, WKNavigationDelegate {
-    private let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
+final class PadPrintRenderer: NSObject, WKNavigationDelegate {
+    private let view: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        return WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 900), configuration: configuration)
+    }()
+    // Retain a window-backed rendering surface without showing the frozen page.
+    private let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 720, height: 900),
+        styleMask: [.borderless], backing: .buffered, defer: false)
     private var continuation: CheckedContinuation<Void, any Error>?
     private var timeout: Task<Void, Never>?
+    private var printContinuation: CheckedContinuation<Bool, Never>?
 
     func loadHTML(_ html: String) async throws {
+        window.isReleasedWhenClosed = false
+        window.contentView = view
         view.navigationDelegate = self
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
@@ -585,13 +614,27 @@ private final class PadPrintRenderer: NSObject, WKNavigationDelegate {
             """, arguments: [:], in: nil, contentWorld: .page)
     }
 
-    func printDocument() {
-        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+    func printDocument(in presentingWindow: NSWindow? = nil, printInfo: NSPrintInfo = .shared, showsPanel: Bool = true) async -> Bool {
+        let info = printInfo.copy() as! NSPrintInfo
         info.horizontalPagination = .fit
         let operation = view.printOperation(with: info)
-        operation.showsPrintPanel = true
-        operation.showsProgressPanel = true
-        operation.run()
+        operation.showsPrintPanel = showsPanel
+        operation.showsProgressPanel = showsPanel
+        // WebKit paginates asynchronously, so printing must leave the main thread available.
+        operation.canSpawnSeparateThread = true
+        return await withCheckedContinuation { continuation in
+            printContinuation = continuation
+            operation.runModal(for: presentingWindow ?? window, delegate: self,
+                didRun: #selector(printDidRun(_:success:contextInfo:)), contextInfo: nil)
+        }
+    }
+
+    @objc nonisolated private func printDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        Task { @MainActor in
+            let continuation = self.printContinuation
+            self.printContinuation = nil
+            continuation?.resume(returning: success)
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(nil) }

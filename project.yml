@@ -69,6 +69,7 @@ targets:
         com.apple.security.app-sandbox: true
         # WebKit helper processes require this even for the offline editor; its page blocks remote resources.
         com.apple.security.network.client: true
+        com.apple.security.print: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
     settings:

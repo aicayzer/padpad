@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 import WebKit
+import PDFKit
 @testable import Pad
 
 @MainActor
@@ -39,6 +40,32 @@ struct MarkdownBridgeTests {
         let clipboard = try await editor.clipboardSnapshot()
         #expect(clipboard.text == "Keep this text")
         #expect(clipboard.html?.contains("<h2") == true)
+    }
+
+    @Test func nativePrintExportsCompleteFrozenPDF() async throws {
+        let editor = PadMarkdownEditorController()
+        let text = "# PRINT HEADING\n\n**Bold body**\n\n| Name | Value |\n| --- | --- |\n| Table cell | 42 |\n\n"
+            + (0..<160).map { "Paragraph \($0) contains printable writing.\n\n" }.joined()
+            + "PRINT FINAL TAIL\n"
+        editor.load(text, documentID: UUID())
+        _ = try await editor.snapshot()
+        let output = try await editor.webView.callAsyncJavaScript("return await window.editor.printable(window.editor.snapshot().generation)", arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+        let html = try #require(output?["html"] as? String)
+        let renderer = PadPrintRenderer()
+        try await renderer.loadHTML(html)
+        let url = FileManager.default.temporaryDirectory.appending(path: "pad-print-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.jobDisposition = .save
+        info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+        #expect(await renderer.printDocument(printInfo: info, showsPanel: false))
+        let pdf = try #require(PDFDocument(url: url))
+        #expect(pdf.pageCount > 1)
+        let contents = pdf.string ?? ""
+        #expect(contents.contains("PRINT HEADING"))
+        #expect(contents.contains("Bold body"))
+        #expect(contents.contains("Table cell"))
+        #expect(contents.contains("PRINT FINAL TAIL"))
     }
 
     @Test func staleCommandsRetainLaterSnapshots() async throws {

@@ -143,7 +143,17 @@ const facade = {
     guardedCommand(() => editor.replaceAll(search, replacement, expected)),
   async printable(expectedGeneration: number) {
     try {
-      return await editor.printableSnapshot(expectedGeneration);
+      const output = await editor.printableSnapshot(expectedGeneration);
+      return {
+        documentId: output.documentId,
+        generation: output.generation,
+        revision: output.revision,
+        format: output.format,
+        html: output.html,
+        styles: output.styles,
+        assetCount: output.assets.length,
+        warnings: output.warnings,
+      };
     } catch (error) {
       if (error instanceof InkKitError)
         return { snapshotError: error.code, message: error.message };

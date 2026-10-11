@@ -7,7 +7,7 @@ struct AppCommands: Commands {
     private var canEdit: Bool { document.isActive && !document.isBusy && !workspace.isTransitioning && !document.onboarding.isPresented }
 
     private var markdownOwnsUndo: Bool {
-        document.currentFormat == .md && document.markdownEditor?.ownsFirstResponder == true
+        document.currentFormat == .md && document.markdownEditor?.webView.window === NSApp.keyWindow && document.markdownEditor?.ownsFirstResponder == true
     }
     private var canUndo: Bool {
         markdownOwnsUndo ? document.markdownEditor?.canUndo == true : NSApp.keyWindow?.firstResponder?.undoManager?.canUndo == true
@@ -44,11 +44,11 @@ struct AppCommands: Commands {
             Button("Undo") {
                 if markdownOwnsUndo { document.markdownEditor?.undo() }
                 else { NSApp.keyWindow?.firstResponder?.undoManager?.undo() }
-            }.keyboardShortcut("z").disabled(!canEdit || !canUndo)
+            }.keyboardShortcut("z").disabled(!canUndo || (markdownOwnsUndo && !canEdit))
             Button("Redo") {
                 if markdownOwnsUndo { document.markdownEditor?.redo() }
                 else { NSApp.keyWindow?.firstResponder?.undoManager?.redo() }
-            }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!canEdit || !canRedo)
+            }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!canRedo || (markdownOwnsUndo && !canEdit))
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") { Task { await document.printDocument() } }

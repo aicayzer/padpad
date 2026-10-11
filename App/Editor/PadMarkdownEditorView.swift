@@ -274,7 +274,9 @@ struct PadMarkdownFindBar: View {
     @Bindable var editor: PadMarkdownEditorController
     var body: some View {
         HStack {
-            TextField("Find", text: $editor.searchText).onSubmit { editor.find() }
+            OverlaySearchField(placeholder: "Find", text: $editor.searchText,
+                isCurrent: { editor.showingFind }, submit: { editor.find() },
+                dismiss: { editor.showingFind = false; editor.focus() })
             TextField("Replace", text: $editor.replacementText)
             Button("Next") { editor.find() }.disabled(editor.searchText.isEmpty)
             Button("Replace") { editor.replace(all: false) }.disabled(!editor.canReplace || editor.searchText.isEmpty)

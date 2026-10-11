@@ -228,6 +228,25 @@ final class PadDocument {
         (try? PadFilename.name(parts: nameParts, format: format, number: nextNumber)) ?? "Invalid filename"
     }
 
+    func printDocument() async {
+        let id = documentID
+        guard !isBusy else { return }
+        operation = .transition
+        defer { operation = nil }
+        guard await captureLatestEditor(), documentID == id else { return }
+        do {
+            if currentFormat == .md {
+                guard let editor = markdownEditor else { throw PadMarkdownEditorError.notReady }
+                try await editor.printDocument()
+            } else {
+                let view = PadPlainTextPrintView.make(text)
+                let operation = NSPrintOperation(view: view)
+                operation.showsPrintPanel = true
+                operation.run()
+            }
+        } catch { self.error = readableError(error, fallback: "Couldn’t print your text. Try again.") }
+    }
+
     func mountMarkdownEditor() {
         guard !onboarding.isPresented, currentFormat == .md, markdownEditor == nil else { return }
         let editor = PadMarkdownEditorController()
@@ -1175,5 +1194,21 @@ private final class PadSharePickerDelegate: NSObject, NSSharingServicePickerDele
 
     func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
         onDismiss()
+    }
+}
+
+@MainActor
+enum PadPlainTextPrintView {
+    static func make(_ text: String) -> NSTextView {
+        let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 1))
+        view.minSize = .zero
+        view.maxSize = NSSize(width: 540, height: CGFloat.greatestFiniteMagnitude)
+        view.isHorizontallyResizable = false
+        view.isVerticallyResizable = true
+        view.textContainer?.widthTracksTextView = true
+        view.string = text
+        view.font = .systemFont(ofSize: 12)
+        view.sizeToFit()
+        return view
     }
 }

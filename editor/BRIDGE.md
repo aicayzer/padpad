@@ -17,3 +17,9 @@ PadPad mounts InkKit without an image adapter and preserves image syntax literal
 ## Verification
 
 Install the locked registry dependency with `pnpm install --frozen-lockfile`, then run editor type checking, consumer tests, and the offline build. Engine regression suites belong in InkKit. Native tests additionally exercise snapshot failure and clipboard interoperability. The app bundles the published package offline; it does not require a network connection at runtime.
+
+## Modes, commands, search, and printing
+
+Markdown Source switches InkKit's editing mode in the existing document; it does not reload source or discard history. Scoped command state controls Undo, Redo, formatting, tables, and replacement availability. Find and Replace searches the current editing mode: literal Markdown in source mode and readable content in formatted mode. TXT continues to use the native text editor and find bar.
+
+Print first captures current source, then awaits the scoped `printableSnapshot`. Its complete HTML includes print CSS and frozen inline image assets. A separate WebKit view waits for fonts and image decoding before presenting the native print panel, including macOS PDF options. Safe fallback warnings appear in the printable content. Snapshot, asset, rendering, and stale document failures stop printing and retain writing.

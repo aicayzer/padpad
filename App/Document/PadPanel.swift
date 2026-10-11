@@ -572,7 +572,10 @@ struct PadView: View {
             ZStack(alignment: .bottom) {
                 if files.currentFormat == .md {
                     if let editor = files.markdownEditor {
-                        PadMarkdownEditorView(editor: editor)
+                        VStack(spacing: 0) {
+                            if editor.showingFind { PadMarkdownFindBar(editor: editor) }
+                            PadMarkdownEditorView(editor: editor)
+                        }
                             .onChange(of: settings.readingWidth, initial: true) {
                                 editor.setReadingWidth(readingColumnWidth)
                             }

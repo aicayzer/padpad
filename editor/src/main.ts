@@ -58,6 +58,9 @@ const editor = await InkKitEditor.mount(
     changed(markdown, generation) {
       post({ type: "changed", markdown, generation });
     },
+    commandStateChanged(state) {
+      post({ type: "commands", ...state });
+    },
     stateChanged(state) {
       post({ type: "state", ...state, generation });
     },
@@ -74,6 +77,29 @@ const editor = await InkKitEditor.mount(
   },
   {},
 );
+function guardedCommand<T>(
+  action: () => T,
+): T | { commandError: string; message: string } {
+  try {
+    return action();
+  } catch (error) {
+    if (
+      error instanceof InkKitError &&
+      [
+        "not-ready",
+        "stale-document",
+        "composition",
+        "operation-pending",
+        "preservation",
+        "image-unavailable",
+        "diagram-unavailable",
+      ].includes(error.code)
+    )
+      return { commandError: error.code, message: error.message };
+    throw error;
+  }
+}
+
 const facade = {
   clipboardResponse(requestId: string, response: { error?: string }) {
     const reply = clipboardReplies.get(requestId);
@@ -107,9 +133,37 @@ const facade = {
     }
   },
   clipboard: () => editor.clipboardSnapshot(true),
+  setEditingMode: (mode: "source" | "formatted", expected: number) =>
+    guardedCommand(() => editor.setEditingMode(mode, expected)),
+  undo: (expected: number) => guardedCommand(() => editor.undo(expected)),
+  redo: (expected: number) => guardedCommand(() => editor.redo(expected)),
+  replace: (search: string, replacement: string, expected: number) =>
+    guardedCommand(() => editor.replace(search, replacement, expected)),
+  replaceAll: (search: string, replacement: string, expected: number) =>
+    guardedCommand(() => editor.replaceAll(search, replacement, expected)),
+  async printable(expectedGeneration: number) {
+    try {
+      const output = await editor.printableSnapshot(expectedGeneration);
+      return {
+        documentId: output.documentId,
+        generation: output.generation,
+        revision: output.revision,
+        format: output.format,
+        html: output.html,
+        styles: output.styles,
+        assetCount: output.assets.length,
+        warnings: output.warnings,
+      };
+    } catch (error) {
+      if (error instanceof InkKitError)
+        return { snapshotError: error.code, message: error.message };
+      throw error;
+    }
+  },
   format: editor.format.bind(editor),
   focus: editor.focus.bind(editor),
-  find: editor.find.bind(editor),
+  find: (search: string, expected: number) =>
+    guardedCommand(() => editor.find(search, expected)),
   insertText: editor.insertText.bind(editor),
   keyDown: editor.keyDown.bind(editor),
   insertPaths: editor.insertPaths.bind(editor),
@@ -139,7 +193,8 @@ window.addEventListener("keydown", (event) => {
     event.metaKey &&
     !event.altKey &&
     !event.ctrlKey &&
-    event.key.toLowerCase() === "k"
+    event.key.toLowerCase() === "k" &&
+    editor.commandState().commands.format.link
   ) {
     event.preventDefault();
     post({ type: "requestLink" });

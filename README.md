@@ -10,8 +10,9 @@ A small place for text and Markdown on your Mac. Keep a quick pad close at hand,
 
 - Capture a thought, paste something, or tidy up text in the quick pad.
 - Edit individual Markdown and plain-text files without a note library.
-- Write formatted Markdown with headings, lists, links, quotes, and code.
-- Save, rename, share, or copy your writing.
+- Write formatted Markdown with headings, lists, links, quotes, and code, or edit its source from Format.
+- Find and replace text in Markdown and plain-text documents.
+- Save, rename, share, or copy your writing. Use File > Print to print or save a PDF.
 - Set a comfortable window size and reading width.
 
 ## Get PadPad

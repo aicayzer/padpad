@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 import WebKit
+import PDFKit
 @testable import Pad
 
 @MainActor
@@ -39,6 +40,87 @@ struct MarkdownBridgeTests {
         let clipboard = try await editor.clipboardSnapshot()
         #expect(clipboard.text == "Keep this text")
         #expect(clipboard.html?.contains("<h2") == true)
+    }
+
+    @Test func editingSurfaceRetainsViewportHeightAndTextSize() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 480)
+        editor.load("Short paragraph\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        let output = try await editor.webView.evaluateJavaScript("""
+            window.editor.setTextSize(21);
+            const surface = document.querySelector('.ProseMirror');
+            const style = getComputedStyle(surface);
+            ({height: surface.getBoundingClientRect().height, viewport: innerHeight,
+              fontSize: style.fontSize, paddingTop: style.paddingTop, paddingBottom: style.paddingBottom})
+            """) as? [String: Any]
+        let height = try #require(output?["height"] as? Double)
+        let viewport = try #require(output?["viewport"] as? Double)
+        #expect(viewport > 0)
+        #expect(height >= viewport)
+        #expect(output?["fontSize"] as? String == "21px")
+        #expect(output?["paddingTop"] as? String == "10px")
+        #expect(output?["paddingBottom"] as? String == "48px")
+    }
+
+    @Test func nativeTextPrintUsesContentHeight() throws {
+        for long in [false, true] {
+            let text = "PLAIN HEADING\n\n**literal markers**\n\n"
+                + (long ? (0..<160).map { "Paragraph \($0) contains plain writing.\n\n" }.joined() : "")
+                + "PLAIN FINAL TAIL\n"
+            let url = FileManager.default.temporaryDirectory.appending(path: "pad-text-print-\(UUID().uuidString).pdf")
+            defer { try? FileManager.default.removeItem(at: url) }
+            let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+            info.jobDisposition = .save
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+            let operation = NSPrintOperation(view: PadPlainTextPrintView.make(text), printInfo: info)
+            operation.showsPrintPanel = false
+            operation.showsProgressPanel = false
+            #expect(operation.run())
+            let pdf = try #require(PDFDocument(url: url))
+            #expect(long ? pdf.pageCount > 1 : pdf.pageCount == 1)
+            #expect(pdf.string?.contains("PLAIN HEADING") == true)
+            #expect(pdf.string?.contains("**literal markers**") == true)
+            #expect(pdf.string?.contains("PLAIN FINAL TAIL") == true)
+        }
+    }
+
+    @Test func nativePrintExportsCompleteFrozenPDF() async throws {
+        let editor = PadMarkdownEditorController()
+        let text = "# PRINT HEADING\n\n**Bold body**\n\n| Name | Value |\n| --- | --- |\n| Table cell | 42 |\n\n"
+            + (0..<160).map { "Paragraph \($0) contains printable writing.\n\n" }.joined()
+            + "PRINT FINAL TAIL\n"
+        editor.load(text, documentID: UUID())
+        _ = try await editor.snapshot()
+        let output = try await editor.webView.callAsyncJavaScript("return await window.editor.printable(window.editor.snapshot().generation)", arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+        let html = try #require(output?["html"] as? String)
+        let renderer = PadPrintRenderer()
+        try await renderer.loadHTML(html)
+        let url = FileManager.default.temporaryDirectory.appending(path: "pad-print-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.jobDisposition = .save
+        info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+        #expect(await renderer.printDocument(printInfo: info, showsPanel: false))
+        let pdf = try #require(PDFDocument(url: url))
+        #expect(pdf.pageCount > 1)
+        let contents = pdf.string ?? ""
+        #expect(contents.contains("PRINT HEADING"))
+        #expect(contents.contains("Bold body"))
+        #expect(contents.contains("Table cell"))
+        #expect(contents.contains("PRINT FINAL TAIL"))
+    }
+
+    @Test func staleCommandsRetainLaterSnapshots() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Keep this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        for script in ["window.editor.setEditingMode('source', -1)", "window.editor.find('text', -1)", "window.editor.replaceAll('text', 'lost', -1)", "window.editor.undo(-1)"] {
+            let result = try await editor.webView.evaluateJavaScript(script) as? [String: Any]
+            #expect(result?["commandError"] as? String == "stale-document")
+        }
+        #expect(editor.isReady)
+        #expect(try await editor.snapshot() == nil)
     }
 
     @Test func unknownSnapshotFailureStillDisablesTheBridge() async throws {

@@ -4,6 +4,18 @@ import Testing
 
 @MainActor
 @Suite struct ClipboardTests {
+    @Test func delayedPrintRequiresSameDocumentAndRevision() throws {
+        let scope = PadPrintScope(documentID: "fixture", generation: 4, revision: 9)
+        let current: [String: Any] = ["documentId": "fixture", "generation": 4, "revision": 9]
+        try scope.validate(current)
+        for (key, value) in [("documentId", "other" as Any), ("generation", 5 as Any), ("revision", 10 as Any)] {
+            var stale = current
+            stale[key] = value
+            #expect(throws: PadMarkdownEditorError.self) { try scope.validate(stale) }
+        }
+        #expect(throws: PadMarkdownEditorError.self) { try scope.validate(nil) }
+    }
+
     @Test func failedNativeWriteRestoresPreviousRepresentations() throws {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }

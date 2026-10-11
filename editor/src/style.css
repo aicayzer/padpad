@@ -7,6 +7,12 @@
   --rule: color-mix(in srgb, CanvasText 14%, transparent);
   --code-bg: color-mix(in srgb, CanvasText 8%, transparent);
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --inkkit-min-height: 100vh;
+  --inkkit-font-size: 1rem;
+  --inkkit-line-height: normal;
+  --inkkit-padding-top: 10px;
+  --inkkit-padding-inline: 16px;
+  --inkkit-padding-bottom: 48px;
   color-scheme: light dark;
 }
 

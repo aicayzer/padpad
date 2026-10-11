@@ -15,7 +15,7 @@ describe("packed editor consumer", () => {
     });
   });
   afterEach(async () => {
-    await editor.destroy();
+    await editor?.destroy();
     root.remove();
   });
 
@@ -83,5 +83,69 @@ describe("packed editor consumer", () => {
     });
     editor.pasteAsPlainText("**literal**");
     expect(editor.snapshot().text).toContain("\\*\\*literal\\*\\*");
+  });
+  it("switches source without losing untidy input and keeps source undo available", () => {
+    const text = "---\r\ntitle: draft\r\n---\r\n\r\n__bold__  \r\n\r\n";
+    editor.loadDocument({
+      documentId: "source",
+      generation: 7,
+      format: "md",
+      text,
+    });
+    expect(editor.setEditingMode("source", 7)).toBe(true);
+    expect(editor.snapshot(7).text).toBe(text);
+    expect(editor.commandState(7).commands.format.bold).toBe(false);
+    expect(editor.replaceAll("draft", "edited", 7)).toBe(1);
+    expect(editor.commandState(7).commands.undo).toBe(true);
+    expect(editor.undo(7)).toBe(true);
+    expect(editor.snapshot(7).text).toBe(text);
+    expect(editor.redo(7)).toBe(true);
+    expect(editor.snapshot(7).text).toContain("edited");
+    expect(() => editor.replaceAll("edited", "lost", 6)).toThrow();
+    expect(editor.snapshot(7).text).toContain("edited");
+  });
+
+  it("searches source syntax separately from formatted readable text", () => {
+    editor.loadDocument({
+      documentId: "search",
+      generation: 1,
+      format: "md",
+      text: "**bold** and bold",
+    });
+    expect(editor.replaceAll("**bold**", "source", 1)).toBe(0);
+    expect(editor.setEditingMode("source", 1)).toBe(true);
+    expect(editor.replaceAll("**bold**", "source", 1)).toBe(1);
+    expect(editor.snapshot(1).text).toBe("source and bold");
+    expect(editor.replaceAll("", "untouched", 1)).toBe(0);
+  });
+
+  it("freezes complete printable HTML and rejects stale print scope", async () => {
+    editor.loadDocument({
+      documentId: "print",
+      generation: 4,
+      format: "md",
+      text: "# Title\n\n**bold**\n\n<unsafe>",
+    });
+    const output = await editor.printableSnapshot(4);
+    expect(output).toMatchObject({
+      documentId: "print",
+      generation: 4,
+      format: "md",
+      assets: [],
+    });
+    expect(output.html).toContain("<!DOCTYPE html>");
+    expect(output.html).toContain("<style>");
+    expect(output.html).toContain("<strong>bold</strong>");
+    expect(output.html).not.toContain("<unsafe>");
+    expect(output.styles).toContain("height: auto");
+    editor.loadDocument({
+      documentId: "next",
+      generation: 5,
+      format: "md",
+      text: "Other",
+    });
+    expect(output.html).toContain("Title");
+    expect(output.html).not.toContain("Other");
+    await expect(editor.printableSnapshot(4)).rejects.toThrow();
   });
 });

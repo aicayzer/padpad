@@ -36,6 +36,26 @@ enum PadMarkdownEditorError: LocalizedError {
 @Observable
 final class PadMarkdownEditorController: NSObject {
     private(set) var isReady = false
+    private(set) var editingMode = "formatted"
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    private(set) var canReplace = false
+    private(set) var formatAvailability: [String: Bool] = [:]
+    private(set) var tableAvailability: [String: Bool] = [:]
+    var showingFind = false {
+        didSet {
+            if showingFind {
+                if oldValue, let content = webView.window?.contentView, let field = findField(in: content) {
+                    webView.window?.makeFirstResponder(field)
+                    field.selectText(nil)
+                } else { webView.window?.makeFirstResponder(findInputResponder) }
+            } else { findInputResponder.discardEvents() }
+        }
+    }
+    @ObservationIgnored private let findInputResponder = OverlayInputResponder()
+    var searchText = ""
+    var replacementText = ""
+    @ObservationIgnored private var printRenderer: PadPrintRenderer?
     private(set) var activeMarks: Set<String> = []
     var onChanged: (String, UUID) -> Void = { _, _ in }
     var onError: (any Error) -> Void = { _ in }
@@ -112,6 +132,12 @@ final class PadMarkdownEditorController: NSObject {
         generation += 1
         self.documentID = documentID
         activeMarks = []
+        canUndo = false
+        canRedo = false
+        canReplace = false
+        formatAvailability = [:]
+        tableAvailability = [:]
+        showingFind = false
         pendingEvents.removeAll()
         inputBuffer.discardEvents()
         focusTask?.cancel()
@@ -241,7 +267,7 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func capturePendingInput(_ event: NSEvent) -> Bool {
-        guard (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
+        guard !showingFind, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
               let window = webView.window else { return false }
         // A mounted WebKit view can receive keys before its editable DOM has focus.
         inputBuffer.attach(to: window)
@@ -330,8 +356,62 @@ final class PadMarkdownEditorController: NSObject {
         }
     }
 
-    func table(_ command: String) {
+    private func findField(in view: NSView) -> OverlayTextField? {
+        if let field = view as? OverlayTextField, field.placeholderString == "Find" { return field }
+        for child in view.subviews {
+            if let field = findField(in: child) { return field }
+        }
+        return nil
+    }
+
+    func setEditingMode(_ mode: String) {
         guard isReady else { return }
+        call("setEditingMode", json(mode), json(generation))
+    }
+
+    func undo() { guard canUndo else { return }; call("undo", json(generation)) }
+    func redo() { guard canRedo else { return }; call("redo", json(generation)) }
+    func find() { guard isReady else { return }; call("find", json(searchText), json(generation)) }
+    func replace(all: Bool) {
+        guard canReplace, !searchText.isEmpty else { return }
+        call(all ? "replaceAll" : "replace", json(searchText), json(replacementText), json(generation))
+    }
+
+    func printDocument() async throws {
+        guard printRenderer == nil else { return }
+        let expectedGeneration = generation
+        _ = try await snapshot()
+        let result = try await webView.callAsyncJavaScript("return await window.editor.printable(generation)",
+            arguments: ["generation": expectedGeneration], in: nil, contentWorld: .page)
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        if let payload = result as? [String: Any], let code = payload["snapshotError"] as? String {
+            throw PadMarkdownEditorError.snapshotRejected(code: code, message: payload["message"] as? String ?? "Couldn’t prepare printing.")
+        }
+        guard let payload = result as? [String: Any],
+              payload["generation"] as? Int == expectedGeneration,
+              payload["documentId"] as? String == documentID?.uuidString,
+              let revision = payload["revision"] as? Int, payload["format"] as? String == "md",
+              let html = payload["html"] as? String, payload["styles"] is String,
+              payload["assetCount"] is Int, payload["warnings"] is [Any] else {
+            throw PadMarkdownEditorError.invalidResponse
+        }
+        let renderer = PadPrintRenderer()
+        printRenderer = renderer
+        defer { printRenderer = nil }
+        try await renderer.loadHTML(html)
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        let current = try await webView.evaluateJavaScript("window.editor.snapshot(\(expectedGeneration))") as? [String: Any]
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        try PadPrintScope(documentID: documentID?.uuidString ?? "", generation: expectedGeneration, revision: revision).validate(current)
+        if let warnings = payload["warnings"] as? [[String: Any]], !warnings.isEmpty {
+            onError(PadMarkdownEditorError.warning(warnings.compactMap { $0["message"] as? String }.joined(separator: "\n")))
+        }
+        guard let window = webView.window else { throw PadMarkdownEditorError.documentChanged }
+        _ = await renderer.printDocument(in: window)
+    }
+
+    func table(_ command: String) {
+        guard isReady, tableAvailability[command] == true else { return }
         call("table", json(command))
         focus()
     }
@@ -343,16 +423,18 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func format(_ command: PadMarkdownFormatCommand, argument: String? = nil) {
-        guard isReady else { return }
+        guard isReady, formatAvailability[command.rawValue] == true else { return }
         call("format", json(command.rawValue), argument.map { json($0) } ?? "null")
         focus()
     }
 
     private func call(_ function: String, _ arguments: String...) {
         let expectedGeneration = generation
-        webView.evaluateJavaScript("window.editor.\(function)(\(arguments.joined(separator: ",")))") { [weak self] _, error in
-            guard let self, expectedGeneration == self.generation, let error else { return }
-            self.report(error)
+        webView.evaluateJavaScript("window.editor.\(function)(\(arguments.joined(separator: ",")))") { [weak self] result, error in
+            guard let self, expectedGeneration == self.generation else { return }
+            if let payload = result as? [String: Any], let code = payload["commandError"] as? String {
+                self.onError(PadMarkdownEditorError.snapshotRejected(code: code, message: payload["message"] as? String ?? "Try again."))
+            } else if let error { self.report(error) }
         }
     }
 
@@ -404,6 +486,17 @@ final class PadMarkdownEditorController: NSObject {
             guard let receivedGeneration = message["generation"] as? Int, receivedGeneration == generation,
                   let markdown = message["markdown"] as? String, let documentID else { return }
             onChanged(markdown, documentID)
+        case "commands":
+            guard message["generation"] as? Int == generation,
+                  message["documentId"] as? String == documentID?.uuidString,
+                  let commands = message["commands"] as? [String: Any],
+                  let mode = message["mode"] as? String else { return }
+            editingMode = mode
+            canUndo = commands["undo"] as? Bool ?? false
+            canRedo = commands["redo"] as? Bool ?? false
+            canReplace = commands["replace"] as? Bool ?? false
+            formatAvailability = commands["format"] as? [String: Bool] ?? [:]
+            tableAvailability = commands["table"] as? [String: Bool] ?? [:]
         case "state":
             guard isReady else { return }
             if let receivedGeneration = message["generation"] as? Int, receivedGeneration != generation { return }
@@ -482,5 +575,89 @@ private final class PadMarkdownWebView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { onAttach() }
+    }
+}
+
+@MainActor
+final class PadPrintRenderer: NSObject, WKNavigationDelegate {
+    private let view: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        return WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 900), configuration: configuration)
+    }()
+    // Retain a window-backed rendering surface without showing the frozen page.
+    private let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 720, height: 900),
+        styleMask: [.borderless], backing: .buffered, defer: false)
+    private var continuation: CheckedContinuation<Void, any Error>?
+    private var timeout: Task<Void, Never>?
+    private var printContinuation: CheckedContinuation<Bool, Never>?
+
+    func loadHTML(_ html: String) async throws {
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        view.navigationDelegate = self
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            timeout = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                self?.view.stopLoading()
+                self?.finish(PadMarkdownEditorError.notReady)
+            }
+            view.loadHTMLString(html, baseURL: nil)
+        }
+        _ = try await view.callAsyncJavaScript("""
+            await Promise.race([
+                Promise.all([document.fonts.ready, ...Array.from(document.images, image => image.decode())]),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Print assets timed out")), 15000))
+            ]);
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page)
+    }
+
+    func printDocument(in presentingWindow: NSWindow? = nil, printInfo: NSPrintInfo = .shared, showsPanel: Bool = true) async -> Bool {
+        let info = printInfo.copy() as! NSPrintInfo
+        info.horizontalPagination = .fit
+        let operation = view.printOperation(with: info)
+        operation.showsPrintPanel = showsPanel
+        operation.showsProgressPanel = showsPanel
+        // WebKit paginates asynchronously, so printing must leave the main thread available.
+        operation.canSpawnSeparateThread = true
+        return await withCheckedContinuation { continuation in
+            printContinuation = continuation
+            operation.runModal(for: presentingWindow ?? window, delegate: self,
+                didRun: #selector(printDidRun(_:success:contextInfo:)), contextInfo: nil)
+        }
+    }
+
+    @objc nonisolated private func printDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        Task { @MainActor in
+            let continuation = self.printContinuation
+            self.printContinuation = nil
+            continuation?.resume(returning: success)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(nil) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { finish(error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { finish(error) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { finish(PadMarkdownEditorError.unavailable) }
+    private func finish(_ error: (any Error)?) {
+        timeout?.cancel()
+        timeout = nil
+        let pending = continuation
+        continuation = nil
+        if let error { pending?.resume(throwing: error) } else { pending?.resume() }
+    }
+}
+
+struct PadPrintScope {
+    let documentID: String
+    let generation: Int
+    let revision: Int
+
+    func validate(_ current: [String: Any]?) throws {
+        guard current?["generation"] as? Int == generation,
+              current?["documentId"] as? String == documentID,
+              current?["revision"] as? Int == revision else { throw PadMarkdownEditorError.documentChanged }
     }
 }

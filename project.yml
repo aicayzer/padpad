@@ -24,7 +24,7 @@ settings:
     ENABLE_DEBUG_DYLIB: NO
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
-    MARKETING_VERSION: "1.1.5"
+    MARKETING_VERSION: "1.1.6"
     CURRENT_PROJECT_VERSION: 1
     VERSIONING_SYSTEM: apple-generic
     PAD_APP_IDENTIFIER: me.cyzr.pad
@@ -69,6 +69,7 @@ targets:
         com.apple.security.app-sandbox: true
         # WebKit helper processes require this even for the offline editor; its page blocks remote resources.
         com.apple.security.network.client: true
+        com.apple.security.print: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
     settings:

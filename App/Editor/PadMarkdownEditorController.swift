@@ -267,7 +267,7 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func capturePendingInput(_ event: NSEvent) -> Bool {
-        guard !showingFind, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
+        guard ownsFirstResponder, !showingFind, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
               let window = webView.window else { return false }
         // A mounted WebKit view can receive keys before its editable DOM has focus.
         inputBuffer.attach(to: window)

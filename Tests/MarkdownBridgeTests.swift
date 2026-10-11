@@ -7,6 +7,96 @@ import PDFKit
 @MainActor
 @Suite(.serialized, .opensWindows)
 struct MarkdownBridgeTests {
+    private final class ReadingPanel: NSPanel {
+        override var canBecomeKey: Bool { true }
+        override var canBecomeMain: Bool { false }
+    }
+
+    @Test func windowEventRoutingLeavesReadingAndNativeControlsAlone() async throws {
+        let suite = "pad-reading-events-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(suite).md")
+        let source = "# Read this\n\nExisting **writing**.\n"
+        try source.write(to: file, atomically: true, encoding: .utf8)
+        let document = PadDocument(defaults: defaults, presentsWindow: false)
+        try #require(document.openDocument(file))
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        let window = PadPanel(files: document)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 600))
+        editor.webView.frame = NSRect(x: 0, y: 0, width: 500, height: 550)
+        let field = NSTextField(frame: NSRect(x: 0, y: 550, width: 500, height: 30))
+        content.addSubview(editor.webView)
+        content.addSubview(field)
+        window.contentView = content
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: file)
+        }
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        try await ready(editor)
+        try #require(window.isKeyWindow)
+        window.makeFirstResponder(window)
+        func key(_ character: String) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                         timestamp: ProcessInfo.processInfo.systemUptime,
+                                         windowNumber: window.windowNumber, context: nil,
+                                         characters: character, charactersIgnoringModifiers: character,
+                                         isARepeat: false, keyCode: 12))
+        }
+        NSApp.sendEvent(try key("q"))
+        #expect(try await editor.snapshot() == nil)
+        #expect(window.firstResponder === window)
+        #expect(!editor.ownsFirstResponder)
+        #expect(try String(contentsOf: file, encoding: .utf8) == source)
+
+        try #require(window.makeFirstResponder(field))
+        NSApp.sendEvent(try key("q"))
+        #expect(field.stringValue == "q")
+        #expect(try await editor.snapshot() == nil)
+        #expect(!editor.ownsFirstResponder)
+
+        // Explicit composition owns the input buffer before asynchronous DOM focus.
+        editor.enqueue([try key("q")])
+        NSApp.sendEvent(try key("q"))
+        #expect(try await editor.snapshot()?.contains("qq") == true)
+    }
+
+    @Test func textSurfaceFocusDoesNotDrawAnOuterRing() async throws {
+        let editor = PadMarkdownEditorController()
+        let window = ReadingPanel(contentRect: NSRect(x: 100, y: 100, width: 500, height: 600),
+                                  styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = editor.webView
+        let other = ReadingPanel(contentRect: NSRect(x: 650, y: 100, width: 250, height: 200),
+                                 styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
+        other.isReleasedWhenClosed = false
+        defer {
+            window.orderOut(nil); window.contentView = nil; window.close()
+            other.orderOut(nil); other.close()
+        }
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.isKeyWindow)
+        editor.load("Read and edit this text", documentID: UUID())
+        _ = try await editor.snapshot()
+        let outline = try await editor.webView.evaluateJavaScript("""
+        window.editor.focus();
+        getComputedStyle(document.querySelector('.ProseMirror')).outlineStyle
+        """) as? String
+        #expect(outline == "none")
+        other.makeKeyAndOrderFront(nil)
+        #expect(other.isKeyWindow)
+        editor.load("Background document", documentID: UUID())
+        _ = try await editor.snapshot()
+        #expect(other.isKeyWindow)
+        #expect(!window.isKeyWindow)
+    }
+
     @Test func browserCompositionRejectionDoesNotDisableLaterSnapshots() async throws {
         let editor = PadMarkdownEditorController()
         editor.load("Keep this text\n", documentID: UUID())

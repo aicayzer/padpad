@@ -93,6 +93,7 @@ final class PadDocument {
     }
     private(set) var folder: URL
     private(set) var url: URL?
+    private(set) var startsInReadingMode = false
     private(set) var documentID = UUID()
     var text = ""
     private(set) var savedText = ""
@@ -126,6 +127,7 @@ final class PadDocument {
     private var scratchFormat: PadFormat
     private var snapshotApplied = false
     private var editorLoadedSource = ""
+    private var editorLoadedDocumentID: UUID?
     private(set) var markdownEditor: PadMarkdownEditorController?
     @ObservationIgnored var editorClipboard: (@MainActor () async throws -> PadClipboardContents)?
     @ObservationIgnored var editorSnapshot: (@MainActor () async throws -> String?)?
@@ -272,12 +274,18 @@ final class PadDocument {
             return try await editor.clipboardSnapshot()
         }
         editorLoadedSource = text
+        editorLoadedDocumentID = documentID
         editor.load(text, documentID: documentID)
     }
 
     private func reloadEditor() {
         editorLoadedSource = text
-        markdownEditor?.load(text, documentID: documentID)
+        if editorLoadedDocumentID == documentID {
+            markdownEditor?.reload(text, documentID: documentID)
+        } else {
+            editorLoadedDocumentID = documentID
+            markdownEditor?.load(text, documentID: documentID)
+        }
     }
 
     private func captureLatestEditor() async -> Bool {
@@ -547,6 +555,7 @@ final class PadDocument {
     }
 
     private func resetDocument() {
+        startsInReadingMode = false
         documentID = UUID()
         scratchFormat = format
         documentScope?.stopAccessingSecurityScopedResource()
@@ -621,6 +630,7 @@ final class PadDocument {
             }
             documentScope?.stopAccessingSecurityScopedResource()
             documentScope = accessing ? file : nil
+            startsInReadingMode = true
             documentID = UUID()
             url = file
             text = content
@@ -631,9 +641,9 @@ final class PadDocument {
             pendingName = nil
             error = nil
             notice = nil
+            panel?.prepareReading()
             reloadEditor()
             if isQuickPad || url != nil { show() }
-            if leavingOnboarding { panel?.resumeEditor() }
             return true
         } catch {
             if accessing { file.stopAccessingSecurityScopedResource() }

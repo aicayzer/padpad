@@ -7,6 +7,7 @@ protocol PadDocumentWindow where Self: NSWindow {
     func requestEditorFocus()
     func prepareMarkdownSnapshot()
     func prepareOnboarding()
+    func prepareReading()
     func resumeEditor()
     func finishClosing()
     func restoreDefaultSize(animate: Bool)
@@ -49,6 +50,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
         }
         isExcludedFromWindowsMenu = false
         pendingEditorInput.attach(to: self)
+        if files.startsInReadingMode { makeFirstResponder(self) }
         restoreDefaultSize(animate: false)
         let offset = CGFloat(max(0, (files.workspace?.documents.count ?? 1) - 1) % 6) * 24
         setFrameTopLeftPoint(NSPoint(x: frame.minX + offset, y: frame.maxY - offset))
@@ -81,6 +83,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
             guard !self.files.onboarding.isPresented else { return }
             guard self.isKeyWindow, self.isVisible, !self.files.settingsPresented else { return }
             guard !self.pendingEditorInput.isComposing else { return }
+            guard !self.files.startsInReadingMode || self.firstResponder !== self else { return }
             let awaitingEditor = self.firstResponder === self.pendingEditorInput || self.firstResponder === self
             if self.files.currentFormat == .md {
                 guard let editor = self.files.markdownEditor else { return }
@@ -100,6 +103,12 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
         editor.hasExternalMarkedText = { [weak self] in self?.pendingEditorInput.isComposing == true }
         guard !pendingEditorInput.isComposing, pendingEditorInput.eventCount > 0 else { return }
         editor.enqueueInputs(pendingEditorInput.takeInputs())
+    }
+
+    func prepareReading() {
+        pendingTitleInput.discardEvents()
+        pendingEditorInput.discardEvents()
+        makeFirstResponder(self)
     }
 
     func prepareOnboarding() {
@@ -169,7 +178,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
             files.isActive = false
             return
         }
-        if !(firstResponder is NSTextView), files.markdownEditor?.ownsFirstResponder != true {
+        if !files.startsInReadingMode, !(firstResponder is NSTextView), files.markdownEditor?.ownsFirstResponder != true {
             pendingEditorInput.attach(to: self)
             makeFirstResponder(pendingEditorInput)
         }

@@ -1202,7 +1202,7 @@ enum PadPlainTextPrintView {
     static func make(_ text: String) -> NSTextView {
         let view = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 1))
         view.minSize = .zero
-        view.maxSize = NSSize(width: 540, height: .greatestFiniteMagnitude)
+        view.maxSize = NSSize(width: 540, height: CGFloat.greatestFiniteMagnitude)
         view.isHorizontallyResizable = false
         view.isVerticallyResizable = true
         view.textContainer?.widthTracksTextView = true

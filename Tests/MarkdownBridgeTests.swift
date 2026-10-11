@@ -42,6 +42,27 @@ struct MarkdownBridgeTests {
         #expect(clipboard.html?.contains("<h2") == true)
     }
 
+    @Test func editingSurfaceRetainsViewportHeightAndTextSize() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 480)
+        editor.load("Short paragraph\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        let output = try await editor.webView.evaluateJavaScript("""
+            window.editor.setTextSize(21);
+            const surface = document.querySelector('.ProseMirror');
+            const style = getComputedStyle(surface);
+            ({height: surface.getBoundingClientRect().height, viewport: innerHeight,
+              fontSize: style.fontSize, paddingTop: style.paddingTop, paddingBottom: style.paddingBottom})
+            """) as? [String: Any]
+        let height = try #require(output?["height"] as? Double)
+        let viewport = try #require(output?["viewport"] as? Double)
+        #expect(viewport > 0)
+        #expect(height >= viewport)
+        #expect(output?["fontSize"] as? String == "21px")
+        #expect(output?["paddingTop"] as? String == "10px")
+        #expect(output?["paddingBottom"] as? String == "48px")
+    }
+
     @Test func nativeTextPrintUsesContentHeight() throws {
         for long in [false, true] {
             let text = "PLAIN HEADING\n\n**literal markers**\n\n"

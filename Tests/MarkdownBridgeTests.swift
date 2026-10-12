@@ -12,6 +12,83 @@ struct MarkdownBridgeTests {
         override var canBecomeMain: Bool { false }
     }
 
+    @Test func firstContentClickIntoReadyBackgroundDocumentKeepsEditingFocus() async throws {
+        let suite = "pad-background-click-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(suite).md")
+        try "Background document".write(to: file, atomically: true, encoding: .utf8)
+        let secondFile = FileManager.default.temporaryDirectory.appending(path: "\(suite)-second.md")
+        try "Foreground document".write(to: secondFile, atomically: true, encoding: .utf8)
+        let activation = NSWorkspace.OpenConfiguration()
+        activation.activates = true
+        activation.addsToRecentItems = false
+        let running = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
+        try #require(running.processIdentifier == ProcessInfo.processInfo.processIdentifier)
+        let oldPolicy = NSApp.activationPolicy()
+        let settings = AppSettings(defaults: defaults)
+        let workspace = PadWorkspace(settings: settings, defaults: defaults)
+        workspace.open(file)
+        workspace.open(secondFile)
+        let document = try #require(workspace.document(at: file))
+        let window = try #require(document.nativeWindow)
+        let other = try #require(workspace.document(at: secondFile)?.nativeWindow)
+        defer {
+            window.orderOut(nil); window.contentView = nil
+            other.orderOut(nil); other.contentView = nil
+            NSApp.setActivationPolicy(oldPolicy)
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: secondFile)
+        }
+        let deadline = ContinuousClock.now + .seconds(15)
+        while document.markdownEditor == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let editor = try #require(document.markdownEditor)
+        try await ready(editor)
+        try #require(!window.isKeyWindow)
+        try #require(other.isKeyWindow)
+        _ = try await editor.webView.evaluateJavaScript("""
+        window.padClickWitness = [];
+        document.querySelector('.ProseMirror').addEventListener('mousedown', event => {
+          window.padClickWitness.push(event.isTrusted);
+        }, true);
+        true
+        """)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let bounds = editor.webView.bounds
+        try #require(bounds.width > 40 && bounds.height > 40)
+        let point = editor.webView.convert(NSPoint(x: bounds.midX,
+                                                   y: editor.webView.isFlipped ? 20 : bounds.height - 20), to: nil)
+        // Activation and native content mouse delivery happen in one actor turn.
+        // The queued focus helper runs afterward, just as for a first body click.
+        window.makeKeyAndOrderFront(nil)
+        for (number, type) in [NSEvent.EventType.leftMouseDown, .leftMouseUp].enumerated() {
+            let click = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                                      timestamp: ProcessInfo.processInfo.systemUptime,
+                                                      windowNumber: window.windowNumber, context: nil,
+                                                      eventNumber: number + 1, clickCount: 1, pressure: 1))
+            NSApp.sendEvent(click)
+        }
+        let trusted = try await editor.webView.evaluateJavaScript("window.padClickWitness") as? [Bool]
+        try #require(trusted == [true], "The native click must reach the actual content surface")
+        let refreshDeadline = ContinuousClock.now + .seconds(15)
+        while document.isBusy || !editor.isReady, ContinuousClock.now < refreshDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(!document.isBusy && editor.isReady)
+        let key = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil,
+                                              characters: "q", charactersIgnoringModifiers: "q",
+                                              isARepeat: false, keyCode: 12))
+        NSApp.sendEvent(key)
+        #expect(try await editor.snapshot()?.contains("q") == true)
+        #expect(editor.ownsFirstResponder)
+    }
+
     @Test(arguments: [false, true])
     func initialReadingLoadRejectsAutomaticEditorFocusButKeepsNativeFields(nativeField: Bool) async throws {
         let suite = "pad-reading-handoff-\(UUID().uuidString)"

@@ -82,6 +82,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         maxSize = NSSize(width: files.isQuickPad ? Self.maximumWidth : CGFloat.greatestFiniteMagnitude,
                          height: CGFloat.greatestFiniteMagnitude)
         pendingEditorInput.attach(to: self)
+        if files.startsInReadingMode { makeFirstResponder(self) }
         pendingEditorInput.onInput = { [weak self] in self?.requestEditorFocus() }
         NotificationCenter.default.addObserver(self, selector: #selector(applicationBecameActive),
                                                name: NSApplication.didBecomeActiveNotification, object: nil)
@@ -172,7 +173,9 @@ final class PadPanel: NSPanel, PadDocumentWindow {
             self.editorFocusScheduled = false
             guard !self.files.onboarding.isPresented else { return }
             guard self.isKeyWindow, self.isVisible, !self.files.settingsPresented else { return }
+            guard !self.files.holdInitialReadingFocus() else { return }
             guard !self.pendingEditorInput.isComposing else { return }
+            guard !self.files.startsInReadingMode || self.firstResponder !== self else { return }
             let awaitingEditor = self.firstResponder === self.pendingEditorInput || self.firstResponder === self
             if self.files.currentFormat == .md {
                 guard let editor = self.files.markdownEditor else { return }
@@ -192,6 +195,12 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         editor.hasExternalMarkedText = { [weak self] in self?.pendingEditorInput.isComposing == true }
         guard !pendingEditorInput.isComposing, pendingEditorInput.eventCount > 0 else { return }
         editor.enqueueInputs(pendingEditorInput.takeInputs())
+    }
+
+    func prepareReading() {
+        pendingTitleInput.discardEvents()
+        pendingEditorInput.discardEvents()
+        makeFirstResponder(self)
     }
 
     func prepareOnboarding() {
@@ -221,6 +230,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         if !files.onboarding.isPresented, files.currentFormat == .md, firstResponder !== pendingEditorInput,
            files.markdownEditor?.capturePendingInput(event) == true { return }
         super.sendEvent(event)
+        files.acceptMarkdownContentClick(event)
     }
 
     // Onboarding may be summoned as a nonactivating panel before SwiftUI has a
@@ -367,7 +377,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
             files.isActive = false
             return
         }
-        if !(firstResponder is NSTextView), files.markdownEditor?.ownsFirstResponder != true {
+        if !files.startsInReadingMode, !(firstResponder is NSTextView), files.markdownEditor?.ownsFirstResponder != true {
             pendingEditorInput.attach(to: self)
             makeFirstResponder(pendingEditorInput)
         }
@@ -637,16 +647,19 @@ struct PadView: View {
         .ignoresSafeArea()
         .tint(settings.accentColor)
         .disabled(files.isBusy || files.workspace?.isTransitioning == true)
-        .defaultFocus($editing, true)
+        .defaultFocus($editing, !files.startsInReadingMode)
         .onAppear {
             let action = openSettings
             files.showSettings = { action() }
         }
-        .onChange(of: files.documentID) { finishRename(refocus: false) }
+        .onChange(of: files.documentID) {
+            if files.startsInReadingMode { editing = false }
+            finishRename(refocus: false)
+        }
         .onChange(of: files.currentFormat) { showingFormatting = false }
         .onChange(of: files.isActive, initial: true) {
             if files.isActive {
-                if !renaming { editing = true }
+                if !renaming, !files.startsInReadingMode { editing = true }
             } else if renaming {
                 commitRename(refocus: false)
             }
@@ -678,16 +691,10 @@ struct PadView: View {
 
     private func finishRename(refocus: Bool = true) {
         renaming = false
-        if refocus { editing = files.isActive }
-        // Let the clicked control take focus before choosing a fallback for blank header space.
+        guard refocus else { return }
+        editing = files.isActive
         DispatchQueue.main.async {
             guard files.isActive, !renaming else { return }
-            if !refocus {
-                guard let window = files.nativeWindow, window.isKeyWindow,
-                      window.attachedSheet == nil,
-                      window.firstResponder == nil || window.firstResponder === window else { return }
-                editing = true
-            }
             files.markdownEditor?.focus()
         }
     }

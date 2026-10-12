@@ -7,7 +7,7 @@ struct AppCommands: Commands {
     private var canEdit: Bool { document.isActive && !document.isBusy && !workspace.isTransitioning && !document.onboarding.isPresented }
 
     private var markdownOwnsUndo: Bool {
-        document.currentFormat == .md && document.markdownEditor?.webView.window === NSApp.keyWindow && document.markdownEditor?.ownsFirstResponder == true
+        document.markdownOwnsFirstResponder
     }
     private var canUndo: Bool {
         markdownOwnsUndo ? document.markdownEditor?.canUndo == true : NSApp.keyWindow?.firstResponder?.undoManager?.canUndo == true

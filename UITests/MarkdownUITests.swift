@@ -3,6 +3,36 @@ import XCTest
 
 @MainActor
 final class MarkdownUITests: XCTestCase {
+    func testExistingFileReadsUntilClickWhileNewScratchComposes() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appending(path: "Reading.md")
+        let original = "Read this existing file"
+        try Data(original.utf8).write(to: file)
+        let app = launchPad()
+        defer { app.terminate() }
+        app.typeKey("o", modifierFlags: .command)
+        open(file, in: app)
+        let window = app.windows.matching(NSPredicate(format: "title CONTAINS %@", "Reading.md")).firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10), app.debugDescription)
+        waitForEditor(app, in: window)
+        app.typeKey("q", modifierFlags: [])
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        waitForClipboard(original)
+        attach(window.screenshot(), name: "Existing file initially reads without a caret")
+
+        window.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText(" after click")
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        waitForClipboard(original + " after click")
+        app.typeKey("n", modifierFlags: .command)
+        waitForEditor(app)
+        app.typeText("New scratch composes immediately")
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        waitForClipboard("New scratch composes immediately")
+    }
+
     func testMarkdownPasteFormattingSaveReopenAndSettingsReturn() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -58,6 +88,7 @@ final class MarkdownUITests: XCTestCase {
         XCTAssertTrue(fileWindow.waitForExistence(timeout: 10), app.debugDescription)
         waitForEditor(app, in: fileWindow)
         XCTAssertFalse(fileWindow.buttons["documentFormat"].exists, "Opened files retain their file type")
+        fileWindow.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).click()
         app.typeKey(.downArrow, modifierFlags: .command)
         app.typeText("\nAfter reopen")
         app.typeKey("s", modifierFlags: .command)
@@ -232,6 +263,7 @@ final class MarkdownUITests: XCTestCase {
             let fileWindow = app.windows[saved.lastPathComponent].firstMatch
             XCTAssertTrue(fileWindow.waitForExistence(timeout: 10), app.debugDescription)
             waitForEditor(app, in: fileWindow)
+            fileWindow.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).click()
             app.typeKey(.downArrow, modifierFlags: .command)
             app.typeText("Continued editing")
             app.typeKey("s", modifierFlags: .command)

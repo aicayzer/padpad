@@ -93,6 +93,8 @@ final class PadDocument {
     }
     private(set) var folder: URL
     private(set) var url: URL?
+    private(set) var startsInReadingMode = false
+    private var pendingReadingDocumentID: UUID?
     private(set) var documentID = UUID()
     var text = ""
     private(set) var savedText = ""
@@ -126,6 +128,7 @@ final class PadDocument {
     private var scratchFormat: PadFormat
     private var snapshotApplied = false
     private var editorLoadedSource = ""
+    private var editorLoadedDocumentID: UUID?
     private(set) var markdownEditor: PadMarkdownEditorController?
     @ObservationIgnored var editorClipboard: (@MainActor () async throws -> PadClipboardContents)?
     @ObservationIgnored var editorSnapshot: (@MainActor () async throws -> String?)?
@@ -260,6 +263,7 @@ final class PadDocument {
         }
         editor.onReady = { [weak self] in
             guard let self, !self.onboarding.isPresented, self.currentFormat == .md else { return }
+            guard !self.holdInitialReadingFocus() else { return }
             self.panel?.requestEditorFocus()
         }
         markdownEditor = editor
@@ -272,12 +276,39 @@ final class PadDocument {
             return try await editor.clipboardSnapshot()
         }
         editorLoadedSource = text
+        editorLoadedDocumentID = documentID
         editor.load(text, documentID: documentID)
+    }
+
+    func acceptMarkdownContentClick(_ event: NSEvent) {
+        guard event.type == .leftMouseDown, !onboarding.isPresented, currentFormat == .md,
+              let editor = markdownEditor, let window = editor.webView.window,
+              event.windowNumber == window.windowNumber, let content = window.contentView,
+              let parent = content.superview,
+              let target = content.hitTest(parent.convert(event.locationInWindow, from: nil)),
+              target === editor.webView || target.isDescendant(of: editor.webView) else { return }
+        pendingReadingDocumentID = nil
+        editor.contentWasClicked()
+    }
+
+    func holdInitialReadingFocus() -> Bool {
+        guard pendingReadingDocumentID == documentID else { return false }
+        guard let editor = markdownEditor, editor.isReady, let panel,
+              panel.isKeyWindow, editor.webView.window === panel else { return true }
+        pendingReadingDocumentID = nil
+        // Native WebKit ownership during mounting does not establish editing intent.
+        if editor.ownsFirstResponder { panel.prepareReading() }
+        return true
     }
 
     private func reloadEditor() {
         editorLoadedSource = text
-        markdownEditor?.load(text, documentID: documentID)
+        if editorLoadedDocumentID == documentID {
+            markdownEditor?.reload(text, documentID: documentID)
+        } else {
+            editorLoadedDocumentID = documentID
+            markdownEditor?.load(text, documentID: documentID)
+        }
     }
 
     private func captureLatestEditor() async -> Bool {
@@ -314,10 +345,15 @@ final class PadDocument {
         return true
     }
 
+    var markdownOwnsFirstResponder: Bool {
+        currentFormat == .md && markdownEditor?.webView.window === NSApp.keyWindow
+            && markdownEditor?.ownsFirstResponder == true
+    }
+
     func pasteAsPlainText() {
         guard let value = NSPasteboard.general.string(forType: .string), !isBusy else { return }
-        if currentFormat == .md { markdownEditor?.pasteAsPlainText(value) }
-        else { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
+        if markdownOwnsFirstResponder { markdownEditor?.pasteAsPlainText(value) }
+        else { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
     }
 
     func copyAllContents(asMarkdown: Bool = false, to pasteboard: NSPasteboard = .general) async {
@@ -547,6 +583,8 @@ final class PadDocument {
     }
 
     private func resetDocument() {
+        startsInReadingMode = false
+        pendingReadingDocumentID = nil
         documentID = UUID()
         scratchFormat = format
         documentScope?.stopAccessingSecurityScopedResource()
@@ -621,8 +659,10 @@ final class PadDocument {
             }
             documentScope?.stopAccessingSecurityScopedResource()
             documentScope = accessing ? file : nil
+            startsInReadingMode = true
             documentID = UUID()
             url = file
+            pendingReadingDocumentID = currentFormat == .md ? documentID : nil
             text = content
             savedText = content
             baseline = bytes
@@ -631,9 +671,9 @@ final class PadDocument {
             pendingName = nil
             error = nil
             notice = nil
+            panel?.prepareReading()
             reloadEditor()
             if isQuickPad || url != nil { show() }
-            if leavingOnboarding { panel?.resumeEditor() }
             return true
         } catch {
             if accessing { file.stopAccessingSecurityScopedResource() }

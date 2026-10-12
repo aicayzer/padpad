@@ -12,6 +12,126 @@ struct MarkdownBridgeTests {
         override var canBecomeMain: Bool { false }
     }
 
+    @Test(arguments: [false, true])
+    func initialReadingLoadRejectsAutomaticEditorFocusButKeepsNativeFields(nativeField: Bool) async throws {
+        let suite = "pad-reading-handoff-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let folder = FileManager.default.temporaryDirectory.appending(path: suite)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let first = folder.appending(path: "First.md")
+        let second = folder.appending(path: "Second.md")
+        try "First document".write(to: first, atomically: true, encoding: .utf8)
+        let source = "Second **document**"
+        try source.write(to: second, atomically: true, encoding: .utf8)
+        let document = PadDocument(defaults: defaults, defaultFolder: folder)
+        try #require(document.openDocument(first))
+        let window = try #require(document.nativeWindow)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let deadline = ContinuousClock.now + .seconds(15)
+        while document.markdownEditor == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let editor = try #require(document.markdownEditor)
+        try await ready(editor)
+        try #require(window.isKeyWindow)
+        let host = try #require(window.contentView)
+        let content = NSView(frame: host.frame)
+        host.autoresizingMask = [.width, .height]
+        content.addSubview(host)
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 30))
+        content.addSubview(field)
+        window.contentView = content
+        try #require(document.openDocument(second))
+        try #require(!editor.isReady)
+        // AppKit can choose the native WebKit view while its new document is loading.
+        // Neither responder change below is a content click or a composition request.
+        try #require(window.makeFirstResponder(nativeField ? field : editor.webView))
+        let fieldResponder = window.firstResponder
+        _ = try await editor.snapshot()
+        let key = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil,
+                                              characters: "q", charactersIgnoringModifiers: "q",
+                                              isARepeat: false, keyCode: 12))
+        NSApp.sendEvent(key)
+        #expect(try await editor.snapshot() == nil)
+        #expect(!editor.ownsFirstResponder)
+        if nativeField {
+            #expect(field.stringValue == "q")
+            #expect(window.firstResponder === fieldResponder)
+        } else {
+            #expect(window.firstResponder === window)
+        }
+        // A same-document reload retains intentionally requested editing focus.
+        editor.focus()
+        _ = try await editor.snapshot()
+        editor.reload(source, documentID: document.documentID)
+        _ = try await editor.snapshot()
+        #expect(editor.ownsFirstResponder)
+    }
+
+    @Test func plainPasteCommandRespectsNativeFieldOwnership() async throws {
+        let previous = (NSPasteboard.general.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let bytes = item.data(forType: type) { copy.setData(bytes, forType: type) }
+            }
+            return copy
+        }
+        defer {
+            NSPasteboard.general.clearContents()
+            if !previous.isEmpty { NSPasteboard.general.writeObjects(previous) }
+        }
+        let suite = "pad-plain-paste-owner-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let document = PadDocument(defaults: defaults, presentsWindow: false)
+        document.text = "Preserved document"
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        let window = PadPanel(files: document)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 600))
+        editor.webView.frame = NSRect(x: 0, y: 0, width: 500, height: 550)
+        let field = NSTextField(frame: NSRect(x: 0, y: 550, width: 500, height: 30))
+        content.addSubview(editor.webView)
+        content.addSubview(field)
+        window.contentView = content
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+        }
+        window.makeKeyAndOrderFront(nil)
+        try await ready(editor)
+        try #require(window.isKeyWindow)
+        try #require(window.makeFirstResponder(field))
+        let responder = window.firstResponder
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("**native field**", forType: .string)
+        // This is the custom menu's action, with a native field as first responder.
+        document.pasteAsPlainText()
+        #expect(try await editor.snapshot() == nil)
+        #expect(field.stringValue == "**native field**")
+        #expect(window.firstResponder === responder)
+        #expect(!editor.ownsFirstResponder)
+        editor.focus()
+        _ = try await editor.snapshot()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("**editor literal**", forType: .string)
+        document.pasteAsPlainText()
+        #expect(try await editor.snapshot()?.contains("\\*\\*editor literal\\*\\*") == true)
+        #expect(field.stringValue == "**native field**")
+        #expect(editor.ownsFirstResponder)
+    }
+
     @Test func windowEventRoutingLeavesReadingAndNativeControlsAlone() async throws {
         let suite = "pad-reading-events-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

@@ -82,6 +82,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
             self.editorFocusScheduled = false
             guard !self.files.onboarding.isPresented else { return }
             guard self.isKeyWindow, self.isVisible, !self.files.settingsPresented else { return }
+            guard !self.files.holdInitialReadingFocus() else { return }
             guard !self.pendingEditorInput.isComposing else { return }
             guard !self.files.startsInReadingMode || self.firstResponder !== self else { return }
             let awaitingEditor = self.firstResponder === self.pendingEditorInput || self.firstResponder === self

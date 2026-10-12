@@ -94,6 +94,7 @@ final class PadDocument {
     private(set) var folder: URL
     private(set) var url: URL?
     private(set) var startsInReadingMode = false
+    private var pendingReadingDocumentID: UUID?
     private(set) var documentID = UUID()
     var text = ""
     private(set) var savedText = ""
@@ -262,6 +263,7 @@ final class PadDocument {
         }
         editor.onReady = { [weak self] in
             guard let self, !self.onboarding.isPresented, self.currentFormat == .md else { return }
+            guard !self.holdInitialReadingFocus() else { return }
             self.panel?.requestEditorFocus()
         }
         markdownEditor = editor
@@ -276,6 +278,16 @@ final class PadDocument {
         editorLoadedSource = text
         editorLoadedDocumentID = documentID
         editor.load(text, documentID: documentID)
+    }
+
+    func holdInitialReadingFocus() -> Bool {
+        guard pendingReadingDocumentID == documentID else { return false }
+        guard let editor = markdownEditor, editor.isReady, let panel,
+              panel.isKeyWindow, editor.webView.window === panel else { return true }
+        pendingReadingDocumentID = nil
+        // Native WebKit ownership during mounting does not establish editing intent.
+        if editor.ownsFirstResponder { panel.prepareReading() }
+        return true
     }
 
     private func reloadEditor() {
@@ -322,10 +334,15 @@ final class PadDocument {
         return true
     }
 
+    var markdownOwnsFirstResponder: Bool {
+        currentFormat == .md && markdownEditor?.webView.window === NSApp.keyWindow
+            && markdownEditor?.ownsFirstResponder == true
+    }
+
     func pasteAsPlainText() {
         guard let value = NSPasteboard.general.string(forType: .string), !isBusy else { return }
-        if currentFormat == .md { markdownEditor?.pasteAsPlainText(value) }
-        else { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
+        if markdownOwnsFirstResponder { markdownEditor?.pasteAsPlainText(value) }
+        else { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
     }
 
     func copyAllContents(asMarkdown: Bool = false, to pasteboard: NSPasteboard = .general) async {
@@ -556,6 +573,7 @@ final class PadDocument {
 
     private func resetDocument() {
         startsInReadingMode = false
+        pendingReadingDocumentID = nil
         documentID = UUID()
         scratchFormat = format
         documentScope?.stopAccessingSecurityScopedResource()
@@ -633,6 +651,7 @@ final class PadDocument {
             startsInReadingMode = true
             documentID = UUID()
             url = file
+            pendingReadingDocumentID = currentFormat == .md ? documentID : nil
             text = content
             savedText = content
             baseline = bytes

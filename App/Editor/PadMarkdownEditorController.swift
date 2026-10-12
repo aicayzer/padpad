@@ -266,6 +266,12 @@ final class PadMarkdownEditorController: NSObject {
         }
     }
 
+    func contentWasClicked() {
+        guard isReady, focusTask == nil, !showingFind, pendingEvents.isEmpty,
+              inputBuffer.eventCount == 0, !inputBuffer.isComposing else { return }
+        hasFocusedDocument = true
+    }
+
     func capturePendingInput(_ event: NSEvent) -> Bool {
         guard ownsFirstResponder, !showingFind, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
               let window = webView.window else { return false }

@@ -138,6 +138,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
         if !files.onboarding.isPresented, files.currentFormat == .md, firstResponder !== pendingEditorInput,
            files.markdownEditor?.capturePendingInput(event) == true { return }
         super.sendEvent(event)
+        files.acceptMarkdownContentClick(event)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

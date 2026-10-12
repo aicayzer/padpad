@@ -280,6 +280,17 @@ final class PadDocument {
         editor.load(text, documentID: documentID)
     }
 
+    func acceptMarkdownContentClick(_ event: NSEvent) {
+        guard event.type == .leftMouseDown, !onboarding.isPresented, currentFormat == .md,
+              let editor = markdownEditor, let window = editor.webView.window,
+              event.windowNumber == window.windowNumber, let content = window.contentView,
+              let parent = content.superview,
+              let target = content.hitTest(parent.convert(event.locationInWindow, from: nil)),
+              target === editor.webView || target.isDescendant(of: editor.webView) else { return }
+        pendingReadingDocumentID = nil
+        editor.contentWasClicked()
+    }
+
     func holdInitialReadingFocus() -> Bool {
         guard pendingReadingDocumentID == documentID else { return false }
         guard let editor = markdownEditor, editor.isReady, let panel,

@@ -230,6 +230,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         if !files.onboarding.isPresented, files.currentFormat == .md, firstResponder !== pendingEditorInput,
            files.markdownEditor?.capturePendingInput(event) == true { return }
         super.sendEvent(event)
+        files.acceptMarkdownContentClick(event)
     }
 
     // Onboarding may be summoned as a nonactivating panel before SwiftUI has a

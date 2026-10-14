@@ -17,6 +17,8 @@ A small place for text and Markdown on your Mac. Keep a quick pad close at hand,
 
 ## Get PadPad
 
-Requires macOS 27 or later. The beta is available to invited testers through TestFlight. A public App Store release is planned.
+Requires macOS 27 or later. Available on the Mac App Store.
+
+[![Download on the App Store](Design/app-store-black.svg)](https://apps.apple.com/app/padpad/id6817015415?mt=12)
 
 PadPad is free and open source. For contributing and building, see [Development](DEVELOPMENT.md). Distribution guidance is in [Releasing](RELEASING.md).

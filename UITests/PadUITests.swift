@@ -84,19 +84,13 @@ final class GlobalShortcutUITests: XCTestCase {
         let coverID = try XCTUnwrap(coverInfo[kCGWindowNumber as String] as? Int)
         XCTAssertEqual(process.activationPolicy, .accessory)
 
-        func press(_ key: CGKeyCode, modifiers: CGEventFlags = []) throws {
-            let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true))
-            let up = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false))
-            down.flags = modifiers
-            up.flags = modifiers
-            down.post(tap: .cghidEventTap)
-            up.post(tap: .cghidEventTap)
-        }
+        let finderMenuBar = finder.menuBars.firstMatch
+        XCTAssertTrue(finderMenuBar.waitForExistence(timeout: 5), finder.debugDescription)
         let editor = app.textViews.firstMatch
         let close = app.buttons["Close PadPad"].firstMatch
         XCTAssertFalse(close.exists)
         for cycle in 1...3 {
-            try press(11, modifiers: [.maskAlternate, .maskShift])
+            finderMenuBar.typeKey("b", modifierFlags: [.option, .shift])
             XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
             XCTAssertTrue(coverFrame.intersects(editor.frame), "The disposable Finder window must overlap the editor")
             let ordering = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -112,12 +106,12 @@ final class GlobalShortcutUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [ordering], timeout: 5), .completed,
                            "The quick pad must be above the overlapping foreground window")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
-            // Send hardware-style events without activating or clicking the target application.
-            try press(0)
+            // Synthesize through the foreground app without activating or clicking PadPad.
+            finderMenuBar.typeKey("a", modifierFlags: [])
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", String(repeating: "a", count: cycle)), object: editor)
             XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 5), .completed, "Typing must reach the pad without a click")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
-            try press(11, modifiers: [.maskAlternate, .maskShift])
+            finderMenuBar.typeKey("b", modifierFlags: [.option, .shift])
             let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
             XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
         }

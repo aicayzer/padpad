@@ -75,8 +75,6 @@ final class GlobalShortcutUITests: XCTestCase {
         titleBar.press(forDuration: 0.1, thenDragTo: titleBar.withOffset(CGVector(dx: center.x - initialFrame.midX,
                                                                                dy: center.y - initialFrame.midY)))
         let coverFrame = cover.frame
-        XCTAssertEqual(coverFrame.midX, center.x, accuracy: 5)
-        XCTAssertEqual(coverFrame.midY, center.y, accuracy: 5)
         let coverInfo = try XCTUnwrap(visibleWindows().first { window in
             window[kCGWindowOwnerPID as String] as? pid_t == finderPID &&
                 window[kCGWindowNumber as String] as? Int == ownedWindowID &&

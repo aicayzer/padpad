@@ -656,6 +656,76 @@ final class PadUITests: XCTestCase {
         app.menuItems["Dock and menu bar"].click()
     }
 
+    func testGlobalShortcutOpensAboveAnotherApplicationWithoutActivating() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", "txt",
+                               "-pad.saveAutomatically", "NO", "-pad.floating", "YES",
+                               "-showInDock", "NO", "-menuBarItem", "YES",
+                               "-KeyboardShortcuts_pad", #""{\"carbonKeyCode\":11,\"carbonModifiers\":2560}""#]
+        app.launch()
+        defer { app.terminate() }
+        let bundle = try XCTUnwrap(Bundle(for: Self.self).bundleIdentifier)
+        let target = String(bundle.dropLast(".uitests".count))
+        let process = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: target).first)
+        let runner = NSApplication.shared
+        let previousPolicy = runner.activationPolicy()
+        let screen = try XCTUnwrap(NSScreen.main)
+        // A foreground window must overlap the pad: an empty Finder desktop cannot expose an ordering failure.
+        let cover = NSWindow(contentRect: screen.visibleFrame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        cover.isReleasedWhenClosed = false
+        cover.title = "Disposable shortcut foreground fixture"
+        defer {
+            cover.close()
+            runner.setActivationPolicy(previousPolicy)
+        }
+        XCTAssertTrue(runner.setActivationPolicy(.regular))
+        cover.makeKeyAndOrderFront(nil)
+        runner.activate()
+        let runnerPID = ProcessInfo.processInfo.processIdentifier
+        let foreground = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == runnerPID
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [foreground], timeout: 5), .completed)
+        XCTAssertEqual(process.activationPolicy, .accessory)
+
+        func press(_ key: CGKeyCode, modifiers: CGEventFlags = []) throws {
+            let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true))
+            let up = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false))
+            down.flags = modifiers
+            up.flags = modifiers
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
+        let editor = app.textViews.firstMatch
+        let close = app.buttons["Close PadPad"].firstMatch
+        XCTAssertFalse(close.exists)
+        for cycle in 1...3 {
+            try press(11, modifiers: [.maskAlternate, .maskShift])
+            XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
+            let ordering = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                guard let padIndex = windows.firstIndex(where: {
+                    $0[kCGWindowOwnerPID as String] as? pid_t == process.processIdentifier &&
+                    $0[kCGWindowLayer as String] as? Int == Int(NSWindow.Level.floating.rawValue)
+                }), let coverIndex = windows.firstIndex(where: {
+                    $0[kCGWindowNumber as String] as? Int == cover.windowNumber
+                }) else { return false }
+                return padIndex < coverIndex
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ordering], timeout: 5), .completed,
+                           "The quick pad must be above the overlapping foreground window")
+            XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, runnerPID)
+            // Send hardware-style events without activating or clicking the target application.
+            try press(0)
+            expectValue(String(repeating: "a", count: cycle), in: editor)
+            XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, runnerPID)
+            try press(11, modifiers: [.maskAlternate, .maskShift])
+            let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
+            XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
+        }
+    }
+
     func testOptionShiftBReopensHiddenMarkdownFromFinder() {
         continueAfterFailure = false
         let app = XCUIApplication()

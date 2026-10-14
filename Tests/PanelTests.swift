@@ -7,6 +7,36 @@ import Testing
 @MainActor
 @Suite(.serialized, .opensWindows)
 struct PanelTests {
+    @Test(arguments: [true, false])
+    func quickPadUsesTheConfiguredWindowLevel(floating: Bool) throws {
+        let suite = "pad-window-level-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set("txt", forKey: "pad.format")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        defaults.set(floating, forKey: "pad.floating")
+        let document = PadDocument(defaults: defaults)
+        defer {
+            document.close()
+            document.nativeWindow?.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+        }
+
+        document.handleGlobalShortcut()
+        let panel = try #require(document.nativeWindow as? PadPanel)
+        #expect(panel.isVisible)
+        #expect(panel.level == (floating ? NSWindow.Level.floating : .normal))
+
+        document.handleGlobalShortcut()
+        #expect(!panel.isVisible)
+        document.handleGlobalShortcut()
+        #expect(panel.isVisible)
+        #expect(panel.level == (floating ? NSWindow.Level.floating : .normal))
+
+        document.floating = !floating
+        #expect(panel.level == (floating ? NSWindow.Level.normal : .floating))
+    }
+
     @Test func hostingContentKeepsTheExplicitCompactWindowMinimum() async throws {
         let suite = "pad-sizing-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

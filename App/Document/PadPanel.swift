@@ -59,7 +59,6 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         backgroundColor = .clear
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
-        isFloatingPanel = false
         becomesKeyOnlyIfNeeded = false
         if files.isQuickPad {
             collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]

@@ -321,9 +321,15 @@ final class PadMarkdownEditorController: NSObject {
             let input = pendingEvents[0]
             switch input {
             case .text(let text):
-                let inserted = try await webView.evaluateJavaScript("window.editor.insertText(\(json(text)), \(expectedGeneration))") as? Bool
+                let result = try await webView.evaluateJavaScript("window.editor.insertText(\(json(text)), \(expectedGeneration))")
                 guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
-                guard inserted == true else { throw PadMarkdownEditorError.notReady }
+                if let refusal = commandRefusal(result) {
+                    // The editor refused this text and is still usable; tell the person and carry on.
+                    pendingEvents.removeFirst()
+                    onError(refusal)
+                    continue
+                }
+                guard result as? Bool == true else { throw PadMarkdownEditorError.notReady }
                 pendingEvents.removeFirst()
             case .key(let event):
                 if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
@@ -331,8 +337,14 @@ final class PadMarkdownEditorController: NSObject {
                     let flags = event.modifierFlags
                     let input = "{key: \(json(key)), metaKey: \(flags.contains(.command)), ctrlKey: \(flags.contains(.control)), altKey: \(flags.contains(.option)), shiftKey: \(flags.contains(.shift))}"
                     let script = "window.editor.keyDown(\(input), \(expectedGeneration))"
-                    if try await webView.evaluateJavaScript(script) as? Bool == true {
-                        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+                    let result = try await webView.evaluateJavaScript(script)
+                    guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+                    if let refusal = commandRefusal(result) {
+                        pendingEvents.removeFirst()
+                        onError(refusal)
+                        continue
+                    }
+                    if result as? Bool == true {
                         pendingEvents.removeFirst()
                         continue
                     }
@@ -442,10 +454,16 @@ final class PadMarkdownEditorController: NSObject {
         let expectedGeneration = generation
         webView.evaluateJavaScript("window.editor.\(function)(\(arguments.joined(separator: ",")))") { [weak self] result, error in
             guard let self, expectedGeneration == self.generation else { return }
-            if let payload = result as? [String: Any], let code = payload["commandError"] as? String {
-                self.onError(PadMarkdownEditorError.snapshotRejected(code: code, message: payload["message"] as? String ?? "Try again."))
+            if let refusal = self.commandRefusal(result) {
+                self.onError(refusal)
             } else if let error { self.report(error) }
         }
+    }
+
+    /// The bridge answers an edit that InkKit refused with `commandError`; the editor stays usable.
+    private func commandRefusal(_ result: Any?) -> PadMarkdownEditorError? {
+        guard let payload = result as? [String: Any], let code = payload["commandError"] as? String else { return nil }
+        return .snapshotRejected(code: code, message: payload["message"] as? String ?? "Try again.")
     }
 
     private func json(_ value: some Encodable) -> String {

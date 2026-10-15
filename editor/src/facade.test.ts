@@ -118,4 +118,26 @@ describe("native bridge facade", () => {
     facade.setAccent("#336699");
     expect(style.getPropertyValue("--inkkit-accent-color")).toBe("#336699");
   });
+
+  it("reports a preservation refusal to the app and not as a warning", () => {
+    facade.load("", 7, "table");
+    expect(facade.table("insert", 7)).toBe(true);
+    const before = facade.snapshot(7).text;
+    const warnings = posted.filter((entry) => entry.type === "editorWarning");
+    const refusal = facade.insertText("one\ntwo", 7);
+    expect(refusal).toMatchObject({
+      commandError: "preservation",
+      message: expect.stringMatching(/\S/),
+    });
+    expect(facade.snapshot(7).text).toBe(before);
+    expect(posted.filter((entry) => entry.type === "editorWarning")).toEqual(
+      warnings,
+    );
+    expect(facade.insertText("x", 6)).toMatchObject({
+      commandError: "stale-document",
+    });
+    expect(facade.keyDown({ key: "Enter", metaKey: false }, 6)).toMatchObject({
+      commandError: "stale-document",
+    });
+  });
 });

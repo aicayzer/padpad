@@ -412,6 +412,34 @@ struct MarkdownBridgeTests {
         #expect(clipboard.html?.contains("<h2") == true)
     }
 
+    @Test func refusedEditReachesTheAppAndLeavesTheEditorUsable() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Keep this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        var received: [PadMarkdownEditorError] = []
+        editor.onError = { if let error = $0 as? PadMarkdownEditorError { received.append(error) } }
+
+        // InkKit refuses an edit while text composition is active.
+        _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true})); true")
+        editor.pasteAsPlainText("typed")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while received.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true})); true")
+
+        let refusal = try #require(received.first)
+        guard case .snapshotRejected(let code, let message) = refusal else {
+            Issue.record("Expected a refused edit, got \(refusal)")
+            return
+        }
+        #expect(code == "composition")
+        #expect(!message.isEmpty)
+        #expect(refusal.errorDescription?.isEmpty == false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(received.count == 1)
+        #expect(editor.isReady)
+        #expect(try await editor.snapshot() == nil)
+    }
+
     @Test func editingSurfaceRetainsViewportHeightAndTextSize() async throws {
         let editor = PadMarkdownEditorController()
         editor.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 480)

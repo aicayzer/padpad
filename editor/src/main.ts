@@ -4,6 +4,7 @@ import {
   type ClipboardOutput,
   type FormatCommand,
   type FormatOptions,
+  type KeyInput,
   type TableCommand,
 } from "@aicayzer/inkkit";
 import "@aicayzer/inkkit/style.css";
@@ -176,8 +177,10 @@ const facade = {
   focus: editor.focus.bind(editor),
   find: (search: string, expected: number) =>
     guardedCommand(() => editor.find(search, expected)),
-  insertText: editor.insertText.bind(editor),
-  keyDown: editor.keyDown.bind(editor),
+  insertText: (text: string, expected: number) =>
+    guardedCommand(() => editor.insertText(text, expected)),
+  keyDown: (input: KeyInput, expected: number) =>
+    guardedCommand(() => editor.keyDown(input, expected)),
   pasteAsPlainText: (text: string, expected: number) =>
     guardedCommand(() => editor.pasteAsPlainText(text, expected)),
   table: (command: TableCommand, expected: number) =>

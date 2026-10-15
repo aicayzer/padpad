@@ -103,6 +103,7 @@ final class PadDocument {
     var showSettings: @MainActor () -> Void = {}
     private(set) var renameRequest = 0
     var error: String?
+    private(set) var editorFeedback: PadMarkdownEditorFeedback?
     private(set) var notice: String? {
         didSet {
             noticeTask?.cancel()
@@ -256,6 +257,11 @@ final class PadDocument {
         editor.onChanged = { [weak self] markdown, id in
             guard let self, self.documentID == id, self.currentFormat == .md, !self.onboarding.isPresented else { return }
             self.text = markdown
+            if self.editorFeedback?.source == .edit { self.editorFeedback = nil }
+        }
+        editor.onFeedback = { [weak self] feedback, id in
+            guard let self, self.documentID == id, self.currentFormat == .md, !self.onboarding.isPresented else { return }
+            self.editorFeedback = feedback
         }
         editor.onError = { [weak self] error in
             guard let self, self.currentFormat == .md, !self.onboarding.isPresented else { return }
@@ -301,7 +307,15 @@ final class PadDocument {
         return true
     }
 
+    func dismissEditorFeedback() {
+        editorFeedback = nil
+        guard nativeWindow?.isKeyWindow == true, let editor = markdownEditor,
+              !editor.showingFind, !editor.showingLink else { return }
+        editor.focus()
+    }
+
     private func reloadEditor() {
+        editorFeedback = nil
         editorLoadedSource = text
         if editorLoadedDocumentID == documentID {
             markdownEditor?.reload(text, documentID: documentID)

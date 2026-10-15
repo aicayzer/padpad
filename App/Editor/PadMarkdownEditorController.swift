@@ -8,7 +8,7 @@ enum PadMarkdownFormatCommand: String {
 
 enum PadMarkdownEditorError: LocalizedError {
     case notReady, documentChanged, invalidResponse, unavailable, composing
-    case script(String), warning(String)
+    case script(String)
     case snapshotRejected(code: String, message: String)
 
     var errorDescription: String? {
@@ -19,7 +19,6 @@ enum PadMarkdownEditorError: LocalizedError {
         case .invalidResponse: "Couldn’t read your text. Try again."
         case .unavailable: "The editor is unavailable. Your text is still open."
         case .script: "The editor couldn’t complete that action. Your text is still open."
-        case .warning(let message): message
         case .snapshotRejected(let code, _):
             switch code {
             case "composition": "Finish typing before saving or closing."
@@ -28,6 +27,44 @@ enum PadMarkdownEditorError: LocalizedError {
             case "operation-pending": "The editor is finishing a paste. Try again in a moment."
             default: "Couldn’t preserve your text. Your text is still open. Try again."
             }
+        }
+    }
+}
+
+struct PadMarkdownEditorFeedback: Equatable {
+    enum Source: String { case edit, clipboard, print }
+
+    let code: String
+    let source: Source
+
+    var message: String {
+        switch (source, code) {
+        case (.clipboard, "diagram-unavailable"):
+            "Some diagrams couldn’t be exported. Their Markdown source is retained."
+        case (.clipboard, "image-unavailable"):
+            "Some images couldn’t be exported. Their Markdown references are retained."
+        case (.clipboard, _):
+            "Couldn’t copy that content. Try again."
+        case (.print, _):
+            "Some content couldn’t be included in the printout."
+        case (.edit, "preservation"):
+            "Couldn’t apply that edit. Your text is unchanged."
+        case (.edit, "composition"):
+            "Finish typing, then try that action again."
+        case (.edit, "not-ready"):
+            "The editor is still loading. Try again in a moment."
+        case (.edit, "operation-pending"):
+            "The editor is finishing a paste. Try again in a moment."
+        case (.edit, "read-only"):
+            "This content is read-only."
+        case (.edit, "stale-document"):
+            "The document changed. Try that action again."
+        case (.edit, "image-unavailable"):
+            "Couldn’t add that image."
+        case (.edit, "file-unavailable"):
+            "Couldn’t add that file."
+        default:
+            "The editor couldn’t complete that action."
         }
     }
 }
@@ -59,6 +96,7 @@ final class PadMarkdownEditorController: NSObject {
     private(set) var activeMarks: Set<String> = []
     var onChanged: (String, UUID) -> Void = { _, _ in }
     var onError: (any Error) -> Void = { _ in }
+    var onFeedback: (PadMarkdownEditorFeedback, UUID) -> Void = { _, _ in }
     var onReady: () -> Void = {}
     var accentOverride: NSColor? { didSet { applyAccent() } }
     var allowsFocus = true
@@ -326,7 +364,7 @@ final class PadMarkdownEditorController: NSObject {
                 if let refusal = commandRefusal(result) {
                     // The editor refused this text and is still usable; tell the person and carry on.
                     pendingEvents.removeFirst()
-                    onError(refusal)
+                    showFeedback(refusal)
                     continue
                 }
                 guard result as? Bool == true else { throw PadMarkdownEditorError.notReady }
@@ -341,7 +379,7 @@ final class PadMarkdownEditorController: NSObject {
                     guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
                     if let refusal = commandRefusal(result) {
                         pendingEvents.removeFirst()
-                        onError(refusal)
+                        showFeedback(refusal)
                         continue
                     }
                     if result as? Bool == true {
@@ -423,7 +461,7 @@ final class PadMarkdownEditorController: NSObject {
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
         try PadPrintScope(documentID: documentID?.uuidString ?? "", generation: expectedGeneration, revision: revision).validate(current)
         if let warnings = payload["warnings"] as? [[String: Any]], !warnings.isEmpty {
-            onError(PadMarkdownEditorError.warning(warnings.compactMap { $0["message"] as? String }.joined(separator: "\n")))
+            showFeedback(PadMarkdownEditorFeedback(code: "export-degraded", source: .print))
         }
         guard let window = webView.window else { throw PadMarkdownEditorError.documentChanged }
         _ = await renderer.printDocument(in: window)
@@ -455,15 +493,15 @@ final class PadMarkdownEditorController: NSObject {
         webView.evaluateJavaScript("window.editor.\(function)(\(arguments.joined(separator: ",")))") { [weak self] result, error in
             guard let self, expectedGeneration == self.generation else { return }
             if let refusal = self.commandRefusal(result) {
-                self.onError(refusal)
+                self.showFeedback(refusal)
             } else if let error { self.report(error) }
         }
     }
 
     /// The bridge answers an edit that InkKit refused with `commandError`; the editor stays usable.
-    private func commandRefusal(_ result: Any?) -> PadMarkdownEditorError? {
+    private func commandRefusal(_ result: Any?) -> PadMarkdownEditorFeedback? {
         guard let payload = result as? [String: Any], let code = payload["commandError"] as? String else { return nil }
-        return .snapshotRejected(code: code, message: payload["message"] as? String ?? "Try again.")
+        return PadMarkdownEditorFeedback(code: code, source: .edit)
     }
 
     private func json(_ value: some Encodable) -> String {
@@ -512,7 +550,8 @@ final class PadMarkdownEditorController: NSObject {
             applyPendingLoad()
         case "changed":
             guard let receivedGeneration = message["generation"] as? Int, receivedGeneration == generation,
-                  let markdown = message["markdown"] as? String, let documentID else { return }
+                  let markdown = message["markdown"] as? String, let documentID,
+                  message["documentId"] as? String == documentID.uuidString else { return }
             onChanged(markdown, documentID)
         case "commands":
             guard message["generation"] as? Int == generation,
@@ -557,11 +596,21 @@ final class PadMarkdownEditorController: NSObject {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         case "editorWarning":
-            onError(PadMarkdownEditorError.warning(message["message"] as? String ?? "The editor couldn’t complete that action."))
+            guard message["generation"] as? Int == generation,
+                  message["documentId"] as? String == documentID?.uuidString,
+                  let code = message["code"] as? String,
+                  let rawSource = message["source"] as? String,
+                  let source = PadMarkdownEditorFeedback.Source(rawValue: rawSource) else { return }
+            showFeedback(PadMarkdownEditorFeedback(code: code, source: source))
         case "error":
             report(PadMarkdownEditorError.script(message["message"] as? String ?? "Unknown error"))
         default: break
         }
+    }
+
+    private func showFeedback(_ feedback: PadMarkdownEditorFeedback) {
+        guard let documentID else { return }
+        onFeedback(feedback, documentID)
     }
 
     private func report(_ error: any Error) {

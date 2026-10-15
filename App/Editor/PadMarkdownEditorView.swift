@@ -66,7 +66,7 @@ struct PadMarkdownToolbar: View {
                 Toggle("Heading \(level)", isOn: Binding(
                     get: { editor.activeMarks.contains("heading\(level)") },
                     set: { _ in editor.format(.heading, argument: String(level)) }
-                )).disabled(editor.formatAvailability["heading"] != true)
+                )).disabled(editor.formatAvailability["heading\(level)"] != true)
             }
         }
     }

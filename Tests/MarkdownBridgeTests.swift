@@ -433,6 +433,25 @@ struct MarkdownBridgeTests {
         #expect(output?["paddingBottom"] as? String == "48px")
     }
 
+    @Test func readingWidthCentersTheWritingColumn() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 480)
+        editor.load("Short paragraph\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        let script = """
+            const surface = document.querySelector('.ProseMirror');
+            const column = document.getElementById('editor').clientWidth;
+            ({left: parseFloat(getComputedStyle(surface).paddingLeft), column})
+            """
+        editor.setReadingWidth(400)
+        let narrow = try #require(try await editor.webView.evaluateJavaScript(script) as? [String: Any])
+        let column = try #require(narrow["column"] as? Double)
+        #expect(abs(try #require(narrow["left"] as? Double) - ((column - 400) / 2 + 16)) < 0.5)
+        editor.setReadingWidth(nil)
+        let full = try #require(try await editor.webView.evaluateJavaScript(script) as? [String: Any])
+        #expect(full["left"] as? Double == 16)
+    }
+
     @Test func nativeTextPrintUsesContentHeight() throws {
         for long in [false, true] {
             let text = "PLAIN HEADING\n\n**literal markers**\n\n"
@@ -571,6 +590,7 @@ struct MarkdownBridgeTests {
         editor.load("Selected words", documentID: UUID())
         try await ready(editor)
         for level in 1...3 {
+            #expect(editor.formatAvailability["heading\(level)"] == true)
             editor.format(.heading, argument: String(level))
             _ = try await editor.snapshot()
             try await toolbarState(editor, contains: "heading\(level)", active: true)

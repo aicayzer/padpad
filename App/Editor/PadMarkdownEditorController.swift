@@ -220,7 +220,7 @@ final class PadMarkdownEditorController: NSObject {
         let expectedGeneration = generation
         _ = try await snapshot()
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
-        let result = try await webView.callAsyncJavaScript("return await window.editor.clipboard()", arguments: [:], in: nil, contentWorld: .page)
+        let result = try await webView.callAsyncJavaScript("return await window.editor.clipboard(\(expectedGeneration))", arguments: [:], in: nil, contentWorld: .page)
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
         guard let payload = result as? [String: Any],
               let text = payload["text"] as? String,
@@ -329,7 +329,8 @@ final class PadMarkdownEditorController: NSObject {
                 if event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
                    let key = bufferedKey(event) {
                     let flags = event.modifierFlags
-                    let script = "window.editor.keyDown(\(json(key)), \(json("")), \(flags.contains(.command)), \(flags.contains(.control)), \(flags.contains(.option)), \(flags.contains(.shift)), \(expectedGeneration))"
+                    let input = "{key: \(json(key)), metaKey: \(flags.contains(.command)), ctrlKey: \(flags.contains(.control)), altKey: \(flags.contains(.option)), shiftKey: \(flags.contains(.shift))}"
+                    let script = "window.editor.keyDown(\(input), \(expectedGeneration))"
                     if try await webView.evaluateJavaScript(script) as? Bool == true {
                         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
                         pendingEvents.removeFirst()
@@ -418,19 +419,22 @@ final class PadMarkdownEditorController: NSObject {
 
     func table(_ command: String) {
         guard isReady, tableAvailability[command] == true else { return }
-        call("table", json(command))
+        call("table", json(command), json(generation))
         focus()
     }
 
     func pasteAsPlainText(_ text: String) {
         guard isReady else { return }
-        call("pasteAsPlainText", json(text))
+        call("pasteAsPlainText", json(text), json(generation))
         focus()
     }
 
     func format(_ command: PadMarkdownFormatCommand, argument: String? = nil) {
-        guard isReady, formatAvailability[command.rawValue] == true else { return }
-        call("format", json(command.rawValue), argument.map { json($0) } ?? "null")
+        // InkKit names each heading level; a link takes its destination as an option.
+        let name = command == .heading ? "heading\(argument ?? "")" : command.rawValue
+        guard isReady, formatAvailability[name] == true else { return }
+        let options = command == .link ? argument.map { json(["destination": $0]) } : nil
+        call("format", json(name), options ?? "null", json(generation))
         focus()
     }
 
@@ -503,16 +507,14 @@ final class PadMarkdownEditorController: NSObject {
             canReplace = commands["replace"] as? Bool ?? false
             formatAvailability = commands["format"] as? [String: Bool] ?? [:]
             tableAvailability = commands["table"] as? [String: Bool] ?? [:]
-        case "state":
-            guard isReady else { return }
-            if let receivedGeneration = message["generation"] as? Int, receivedGeneration != generation { return }
-            var active = Set(message["marks"] as? [String] ?? [])
-            if let block = message["block"] as? [String: Any], let type = block["type"] as? String,
+            let caret = message["caret"] as? [String: Any] ?? [:]
+            var active = Set(caret["marks"] as? [String] ?? [])
+            if let block = caret["block"] as? [String: Any], let type = block["type"] as? String,
                type != "paragraph" {
                 active.insert(type)
                 if type == "heading", let level = block["level"] as? Int { active.insert("heading\(level)") }
             }
-            if message["quoted"] as? Bool == true { active.insert("quote") }
+            if caret["quoted"] as? Bool == true { active.insert("quote") }
             activeMarks = active
         case "openLink":
             guard let href = message["href"] as? String, let url = URL(string: href),

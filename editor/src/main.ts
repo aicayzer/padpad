@@ -23,6 +23,9 @@ function post(message: Record<string, unknown>): void {
 
 const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
+type DocumentContext = { documentId: string; generation: number };
+let documentContext: DocumentContext | undefined;
+const errorContexts = new WeakMap<InkKitError, DocumentContext>();
 const clipboardReplies = new Map<
   string,
   { resolve(): void; reject(error: Error): void }
@@ -32,23 +35,37 @@ function warnIfDegraded(output: ClipboardOutput): void {
   if (output.diagrams.some((diagram) => diagram.error))
     post({
       type: "editorWarning",
-      message:
-        "Some diagrams could not be exported; their source was retained.",
+      code: "diagram-unavailable",
+      source: "clipboard",
+      documentId: output.documentId,
+      generation: output.generation,
     });
   if (output.images.some((image) => image.error))
     post({
       type: "editorWarning",
-      message:
-        "Some images could not be exported; their references were retained.",
+      code: "image-unavailable",
+      source: "clipboard",
+      documentId: output.documentId,
+      generation: output.generation,
     });
 }
 function writeClipboard(output: ClipboardOutput): Promise<void> {
   warnIfDegraded(output);
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
+    const rejectScoped = (error: Error) => {
+      const failure = new InkKitError("clipboard-unavailable", error.message, {
+        cause: error,
+      });
+      errorContexts.set(failure, {
+        documentId: output.documentId,
+        generation: output.generation,
+      });
+      reject(failure);
+    };
     const timeout = setTimeout(() => {
       clipboardReplies.delete(requestId);
-      reject(new Error("Clipboard write timed out"));
+      rejectScoped(new Error("Clipboard write timed out"));
     }, 15000);
     clipboardReplies.set(requestId, {
       resolve() {
@@ -57,7 +74,7 @@ function writeClipboard(output: ClipboardOutput): Promise<void> {
       },
       reject(error) {
         clearTimeout(timeout);
-        reject(error);
+        rejectScoped(error);
       },
     });
     post({
@@ -77,10 +94,15 @@ const editor = await InkKitEditor.mount(
       post({
         type: "changed",
         markdown: snapshot.text,
+        documentId: snapshot.documentId,
         generation: snapshot.generation,
       });
     },
     commandStateChanged(state) {
+      documentContext = {
+        documentId: state.documentId,
+        generation: state.generation,
+      };
       post({ type: "commands", ...state });
     },
     openLink(href) {
@@ -90,7 +112,15 @@ const editor = await InkKitEditor.mount(
       post({ type: "copy", text });
     },
     error(error) {
-      post({ type: "editorWarning", message: error.message });
+      const context = errorContexts.get(error) ?? documentContext;
+      if (context)
+        post({
+          type: "editorWarning",
+          code: error.code,
+          source: error.code === "clipboard-unavailable" ? "clipboard" : "edit",
+          message: error.message,
+          ...context,
+        });
     },
     clipboard: writeClipboard,
   },

@@ -606,17 +606,31 @@ struct PadView: View {
                         .padding([.horizontal, .top], 10)
                 }
                 HStack(alignment: .bottom, spacing: 12) {
-                    if let message = files.error ?? files.notice {
-                        Text(message)
-                            .font(.system(size: 13))
-                            .foregroundStyle(files.error != nil ? Color("ErrorColor") : Color.secondary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
-                            .accessibilityIdentifier(files.error != nil ? "documentError" : "documentNotice")
-                            .accessibilityLabel(files.error != nil ? "Error: \(message)" : message)
+                    if let message = files.error {
+                        documentMessage(message, identifier: "documentError", warning: true)
+                    } else if let feedback = files.editorFeedback {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Label(feedback.message, systemImage: "exclamationmark.triangle.fill")
+                                .labelStyle(.titleAndIcon)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("editorFeedback")
+                            Button("Dismiss Message", systemImage: "xmark") {
+                                files.dismissEditorFeedback()
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.plain)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                            .help("Dismiss message")
+                            .accessibilityIdentifier("dismissEditorFeedback")
+                        }
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 10))
+                    } else if let message = files.notice {
+                        documentMessage(message, identifier: "documentNotice", warning: false)
                     }
                     Spacer(minLength: 0)
                     if settings.showFormatToggle, files.isQuickPad, files.url == nil {
@@ -638,6 +652,24 @@ struct PadView: View {
             .clipShape(RoundedRectangle(cornerRadius: 15))
             .padding([.horizontal, .bottom], 7)
         }
+    }
+
+    private func documentMessage(_ message: String, identifier: String, warning: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if warning {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .accessibilityHidden(true)
+            }
+            Text(message)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(identifier)
+                .accessibilityLabel(warning ? "Error: \(message)" : message)
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(warning ? Color.primary : Color.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
     }
 
     private var editorContent: some View {

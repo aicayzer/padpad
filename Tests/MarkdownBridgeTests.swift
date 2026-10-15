@@ -444,8 +444,8 @@ struct MarkdownBridgeTests {
         let editor = PadMarkdownEditorController()
         editor.load("Keep this text\n", documentID: UUID())
         _ = try await editor.snapshot()
-        var received: [PadMarkdownEditorError] = []
-        editor.onError = { if let error = $0 as? PadMarkdownEditorError { received.append(error) } }
+        var received: [PadMarkdownEditorFeedback] = []
+        editor.onFeedback = { feedback, _ in received.append(feedback) }
 
         // InkKit refuses an edit while text composition is active.
         _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true})); true")
@@ -455,13 +455,9 @@ struct MarkdownBridgeTests {
         _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true})); true")
 
         let refusal = try #require(received.first)
-        guard case .snapshotRejected(let code, let message) = refusal else {
-            Issue.record("Expected a refused edit, got \(refusal)")
-            return
-        }
-        #expect(code == "composition")
-        #expect(!message.isEmpty)
-        #expect(refusal.errorDescription?.isEmpty == false)
+        #expect(refusal.code == "composition")
+        #expect(refusal.source == .edit)
+        #expect(refusal.message == "Finish typing, then try that action again.")
         try await Task.sleep(for: .milliseconds(100))
         #expect(received.count == 1)
         #expect(editor.isReady)
@@ -621,20 +617,158 @@ struct MarkdownBridgeTests {
         #expect(try await editor.snapshot() == nil)
     }
 
-    @Test func aRecoverableWarningDoesNotDisableSnapshots() async throws {
+    @Test func recoverableWarningsAreScopedAndDoNotDisableSnapshots() async throws {
         let editor = PadMarkdownEditorController()
-        var warnings = 0
-        editor.onError = { _ in warnings += 1 }
-        editor.load("Keep this text\n", documentID: UUID())
+        var feedback: [PadMarkdownEditorFeedback] = []
+        editor.onFeedback = { value, _ in feedback.append(value) }
+        let id = UUID()
+        editor.load("Keep this text\n", documentID: id)
         _ = try await editor.snapshot()
-        _ = try await editor.webView.evaluateJavaScript("webkit.messageHandlers.host.postMessage({type:'editorWarning',message:'The pasted image is unavailable.'}); true")
+        _ = try await editor.webView.evaluateJavaScript("""
+        for (const scope of [
+          {documentId:'old-document', generation:1},
+          {documentId:'\(id.uuidString)', generation:0},
+          {documentId:'\(id.uuidString)', generation:1}
+        ]) webkit.messageHandlers.host.postMessage({type:'editorWarning', code:'preservation', source:'edit', ...scope});
+        true
+        """)
         for _ in 0..<100 {
-            if warnings == 1 { break }
+            if !feedback.isEmpty { break }
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(warnings == 1)
+        #expect(feedback == [PadMarkdownEditorFeedback(code: "preservation", source: .edit)])
         #expect(editor.isReady)
         #expect(try await editor.snapshot() == nil)
+
+        var changes: [String] = []
+        editor.onChanged = { text, _ in changes.append(text) }
+        _ = try await editor.webView.evaluateJavaScript("""
+        for (const scope of [
+          {documentId:'old-document', generation:1},
+          {documentId:'\(id.uuidString)', generation:0},
+          {documentId:'\(id.uuidString)', generation:1}
+        ]) webkit.messageHandlers.host.postMessage({type:'changed', markdown:'Accepted', ...scope});
+        true
+        """)
+        for _ in 0..<100 {
+            if !changes.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(changes == ["Accepted"])
+    }
+
+    @Test func editingClearsOnlyRecoverableEditFeedbackAndDismissalKeepsText() async throws {
+        let suite = "pad-feedback-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set("md", forKey: "pad.format")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let document = PadDocument(defaults: defaults, presentsWindow: false)
+        document.text = "Keep this text\n"
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        _ = try await editor.snapshot()
+        let warning = PadMarkdownEditorFeedback(code: "preservation", source: .edit)
+        editor.onFeedback(warning, document.documentID)
+        #expect(document.editorFeedback == warning)
+        #expect(document.error == nil)
+        #expect(warning.message == "Couldn’t apply that edit. Your text is unchanged.")
+
+        // A failed save snapshot remains actionable even after editing recovers.
+        let snapshot = document.editorSnapshot
+        document.editorSnapshot = { throw PadMarkdownEditorError.unavailable }
+        document.save()
+        for _ in 0..<100 {
+            if !document.isBusy { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        document.editorSnapshot = snapshot
+        let saveError = try #require(document.error)
+        _ = try await editor.webView.evaluateJavaScript("window.editor.insertText('Later edit ', 1)")
+        for _ in 0..<100 {
+            if document.editorFeedback == nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(document.editorFeedback == nil)
+        #expect(document.error == saveError)
+        #expect(document.text.contains("Later edit"))
+
+        let exportWarning = PadMarkdownEditorFeedback(code: "diagram-unavailable", source: .clipboard)
+        editor.onFeedback(exportWarning, document.documentID)
+        _ = try await editor.webView.evaluateJavaScript("window.editor.insertText('More ', 1)")
+        _ = try await editor.snapshot()
+        #expect(document.editorFeedback == exportWarning)
+        let retained = document.text
+        document.dismissEditorFeedback()
+        #expect(document.editorFeedback == nil)
+        #expect(document.text == retained)
+        #expect(document.error == saveError)
+        editor.onFeedback(warning, UUID())
+        #expect(document.editorFeedback == nil)
+
+        editor.onFeedback(warning, document.documentID)
+        await document.toggleFormat()
+        #expect(document.currentFormat == .txt)
+        #expect(document.editorFeedback == nil)
+        editor.onFeedback(warning, document.documentID)
+        #expect(document.editorFeedback == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func feedbackAppearanceAndDismissalRestoreNativeTyping(dark: Bool) async throws {
+        let suite = "pad-feedback-appearance-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set("md", forKey: "pad.format")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let activation = NSWorkspace.OpenConfiguration()
+        activation.activates = true
+        activation.addsToRecentItems = false
+        _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
+        let previousAppearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        let document = PadDocument(defaults: defaults)
+        document.newFile()
+        let window = try #require(document.nativeWindow)
+        defer {
+            NSApp.appearance = previousAppearance
+            document.editorSnapshot = nil
+            window.orderOut(nil)
+            window.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let deadline = ContinuousClock.now + .seconds(15)
+        while document.markdownEditor?.isReady != true, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let editor = try #require(document.markdownEditor)
+        try await ready(editor)
+        editor.onFeedback(PadMarkdownEditorFeedback(code: "preservation", source: .edit), document.documentID)
+        let content = try #require(window.contentView)
+        // SwiftUI redraws the newly published feedback on the next run-loop turn.
+        try await Task.sleep(for: .milliseconds(100))
+        content.layoutSubtreeIfNeeded()
+        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        let screenshot = try #require(bitmap.representation(using: .png, properties: [:]))
+        let screenshotName = dark ? "editor-feedback-dark.png" : "editor-feedback-light.png"
+        Attachment.record(screenshot, named: screenshotName)
+        window.makeFirstResponder(window)
+        #expect(!editor.ownsFirstResponder)
+        document.dismissEditorFeedback()
+        #expect(document.editorFeedback == nil)
+        let focusDeadline = ContinuousClock.now + .seconds(5)
+        while !editor.ownsFirstResponder, ContinuousClock.now < focusDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(editor.ownsFirstResponder)
+        let key = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil,
+                                              characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12))
+        NSApp.sendEvent(key)
+        #expect(try await editor.snapshot()?.trimmingCharacters(in: .newlines) == "q")
     }
 
     @Test func toolbarStateIncludesHeadingListsAndQuotesAndRepeatedHeadingReturnsToBody() async throws {

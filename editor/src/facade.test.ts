@@ -32,6 +32,7 @@ describe("native bridge facade", () => {
     expect(facade.insertText("!", 1)).toBe(true);
     expect(latest("changed")).toMatchObject({
       generation: 1,
+      documentId: "doc",
       markdown: expect.stringContaining("!"),
     });
     expect(latest("changed").markdown).toBe(facade.snapshot(1).text);
@@ -141,18 +142,82 @@ describe("native bridge facade", () => {
     });
   });
 
+  it("scopes page editing errors with a code and the current document", () => {
+    facade.load("A <!--note--> B\n", 8, "page-event");
+    facade.setKeymap({ codeBlock: ["Mod-Alt-c"] });
+    const press = new KeyboardEvent("keydown", {
+      key: "c",
+      metaKey: true,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.querySelector(".ProseMirror")!.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    expect(latest("editorWarning")).toMatchObject({
+      code: "preservation",
+      source: "edit",
+      generation: 8,
+      documentId: "page-event",
+    });
+    expect(facade.snapshot(8).text).toBe("A <!--note--> B\n");
+  });
+
   it("warns when a diagram cannot be exported to the clipboard", async () => {
-    facade.load("```mermaid\ngraph TD\n  A --> B\n```\n", 8, "diagram");
+    facade.load("```mermaid\ngraph TD\n  A --> B\n```\n", 9, "diagram");
     const warnings = () =>
       posted.filter(
         (entry) =>
           entry.type === "editorWarning" &&
-          /diagrams could not be exported/.test(entry.message),
+          entry.code === "diagram-unavailable" &&
+          entry.source === "clipboard",
       );
     const before = warnings().length;
-    const output = await facade.clipboard(8);
+    const output = await facade.clipboard(9);
     expect(output.diagrams.some((diagram: any) => diagram.error)).toBe(true);
     expect(output.text).toContain("A --> B");
     expect(warnings()).toHaveLength(before + 1);
+    expect(warnings().at(-1)).toMatchObject({
+      source: "clipboard",
+      code: "diagram-unavailable",
+      generation: 9,
+      documentId: "diagram",
+    });
+  });
+  it("keeps delayed clipboard failures attached to their original document", async () => {
+    facade.load("```mermaid\ngraph TD\n  A --> B\n```\n", 10, "old-copy");
+    facade.setEditingMode("source", 10);
+    const surface = document.querySelector("textarea")!;
+    surface.setSelectionRange(0, surface.value.length);
+    surface.dispatchEvent(
+      new Event("copy", { bubbles: true, cancelable: true }),
+    );
+    await expect
+      .poll(
+        () => posted.filter((entry) => entry.type === "writeClipboard").length,
+      )
+      .toBeGreaterThan(0);
+    const request = latest("writeClipboard");
+    expect(request.documentId).toBe("old-copy");
+    facade.load("New document\n", 11, "new-copy");
+    facade.clipboardResponse(request.requestId, {
+      error: "Fixture clipboard failure",
+    });
+    await expect
+      .poll(
+        () =>
+          posted.filter(
+            (entry) =>
+              entry.type === "editorWarning" &&
+              entry.code === "clipboard-unavailable",
+          ).length,
+      )
+      .toBeGreaterThan(0);
+    expect(latest("editorWarning")).toMatchObject({
+      code: "clipboard-unavailable",
+      source: "clipboard",
+      generation: 10,
+      documentId: "old-copy",
+    });
   });
 });

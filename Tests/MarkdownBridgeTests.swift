@@ -439,9 +439,11 @@ struct MarkdownBridgeTests {
         editor.load("Short paragraph\n", documentID: UUID())
         _ = try await editor.snapshot()
         let script = """
-            const surface = document.querySelector('.ProseMirror');
-            const column = document.getElementById('editor').clientWidth;
-            ({left: parseFloat(getComputedStyle(surface).paddingLeft), column})
+            (() => {
+                const surface = document.querySelector('.ProseMirror');
+                const column = document.getElementById('editor').clientWidth;
+                return {left: parseFloat(getComputedStyle(surface).paddingLeft), column};
+            })()
             """
         editor.setReadingWidth(400)
         let narrow = try #require(try await editor.webView.evaluateJavaScript(script) as? [String: Any])

@@ -140,4 +140,19 @@ describe("native bridge facade", () => {
       commandError: "stale-document",
     });
   });
+
+  it("warns when a diagram cannot be exported to the clipboard", async () => {
+    facade.load("```mermaid\ngraph TD\n  A --> B\n```\n", 8, "diagram");
+    const warnings = () =>
+      posted.filter(
+        (entry) =>
+          entry.type === "editorWarning" &&
+          /diagrams could not be exported/.test(entry.message),
+      );
+    const before = warnings().length;
+    const output = await facade.clipboard(8);
+    expect(output.diagrams.some((diagram: any) => diagram.error)).toBe(true);
+    expect(output.text).toContain("A --> B");
+    expect(warnings()).toHaveLength(before + 1);
+  });
 });

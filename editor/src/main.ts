@@ -27,7 +27,23 @@ const clipboardReplies = new Map<
   string,
   { resolve(): void; reject(error: Error): void }
 >();
+// InkKit describes degraded clipboard output in the result and does not raise an error for it.
+function warnIfDegraded(output: ClipboardOutput): void {
+  if (output.diagrams.some((diagram) => diagram.error))
+    post({
+      type: "editorWarning",
+      message:
+        "Some diagrams could not be exported; their source was retained.",
+    });
+  if (output.images.some((image) => image.error))
+    post({
+      type: "editorWarning",
+      message:
+        "Some images could not be exported; their references were retained.",
+    });
+}
 function writeClipboard(output: ClipboardOutput): Promise<void> {
+  warnIfDegraded(output);
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -137,8 +153,11 @@ const facade = {
       throw error;
     }
   },
-  clipboard: (expected: number) =>
-    editor.clipboardSnapshot("document", expected),
+  async clipboard(expected: number) {
+    const output = await editor.clipboardSnapshot("document", expected);
+    warnIfDegraded(output);
+    return output;
+  },
   setEditingMode: (mode: "source" | "formatted", expected: number) =>
     guardedCommand(() => editor.setEditingMode(mode, expected)),
   undo: (expected: number) => guardedCommand(() => editor.undo(expected)),

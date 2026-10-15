@@ -45,7 +45,9 @@ Requires Xcode 27, macOS 27, XcodeGen, Node.js and pnpm. See `DEVELOPMENT.md` an
 
 ## Delivery
 
-App Store/TestFlight distribution only. Start at 1.0.0; subsequent releases increment the patch version unless explicitly agreed otherwise. Use monotonic build numbers and version-matching tags. An upload is not completion: verify processing, internal tester availability and installation. Xcode Cloud workflow setup is separate from repository preparation.
+App Store/TestFlight distribution only. Treat a request for a "new release" or "new version" as a TestFlight candidate unless the user explicitly requests App Store submission. Read `RELEASING.md` and current App Store Connect state before choosing numbers: keep the planned public version for successive candidates, let Xcode Cloud increment the build number, and use a new immutable `vMAJOR.MINOR.PATCH-beta.N` tag. Start the next public version with a patch increment unless the change warrants an agreed larger increment; never bump the public version merely to upload another candidate. TestFlight and public App Store versions may differ, and skipped public versions are normal.
+
+Verify processing and internal tester availability, then hand the exact version and build to the user for TestFlight acceptance. Submit that same build only after the user accepts it and authorizes App Store submission. Keep GitHub candidates marked prerelease; mark a release stable and Latest only when its exact build is public on the App Store. Xcode Cloud workflow setup is separate from repository preparation.
 
 ## Shared editor integration
 

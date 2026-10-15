@@ -1,12 +1,12 @@
 :root {
   /* The document's text size, which the app sets; every text metric below is in rem, so they scale with it. */
   font-size: 15px;
-  --accent: #0a84ff;
-  --text: CanvasText;
-  --muted: color-mix(in srgb, CanvasText 55%, transparent);
-  --rule: color-mix(in srgb, CanvasText 14%, transparent);
-  --code-bg: color-mix(in srgb, CanvasText 8%, transparent);
-  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --inkkit-accent-color: #0a84ff;
+  --inkkit-text-color: CanvasText;
+  --inkkit-muted-color: color-mix(in srgb, CanvasText 55%, transparent);
+  --inkkit-rule-color: color-mix(in srgb, CanvasText 14%, transparent);
+  --inkkit-code-background: color-mix(in srgb, CanvasText 8%, transparent);
+  --inkkit-monospace-font: ui-monospace, "SF Mono", Menlo, monospace;
   --inkkit-min-height: 100vh;
   --inkkit-font-size: 1rem;
   --inkkit-line-height: normal;
@@ -25,7 +25,7 @@ body {
 }
 
 body {
-  color: var(--text);
+  color: var(--inkkit-text-color);
   /* WebKit paints the native caret using this line box; extra leading stretches it above the text. */
   font:
     1rem/normal -apple-system,
@@ -46,35 +46,22 @@ body {
   /* The viewport, not the wrapper Milkdown adds, so a click below the text still places the caret. */
   min-height: 100vh;
   box-sizing: border-box;
-  /* Scroll the final line above the floating footer without reserving a solid row. */
-  /* Keep the editor full-width for hit testing; center only the writing column. */
-  padding: 10px max(16px, calc((100% - var(--reading-width, 100%)) / 2 + 16px))
-    48px;
   outline: none;
   white-space: pre-wrap;
   word-wrap: break-word;
-  caret-color: var(--accent);
+  caret-color: var(--inkkit-accent-color);
   cursor: text;
 }
 
-.ProseMirror .empty {
+.ProseMirror .inkkit-empty {
   position: relative;
 }
 
-.ProseMirror .empty::before {
+.ProseMirror .inkkit-empty::before {
   content: attr(data-placeholder);
   position: absolute;
-  color: var(--muted);
+  color: var(--inkkit-muted-color);
   pointer-events: none;
-}
-
-/* The selection plugin draws the selection over the text alone; the engine's own fills the margins too. */
-.ProseMirror ::selection {
-  background: transparent;
-}
-
-::highlight(selection) {
-  background-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .ProseMirror > :first-child {
@@ -121,7 +108,7 @@ body {
 }
 
 .ProseMirror a {
-  color: var(--accent);
+  color: var(--inkkit-accent-color);
   text-decoration: none;
   text-underline-offset: 2px;
 }
@@ -130,24 +117,20 @@ body {
   text-decoration: underline;
 }
 
-.meta .ProseMirror a {
-  cursor: pointer;
-}
-
 .ProseMirror code {
-  font-family: var(--mono);
+  font-family: var(--inkkit-monospace-font);
   font-size: 0.88em;
-  background: var(--code-bg);
+  background: var(--inkkit-code-background);
   border-radius: 5px;
   padding: 0.067rem 0.333rem;
 }
 
 .ProseMirror pre {
   position: relative;
-  font-family: var(--mono);
+  font-family: var(--inkkit-monospace-font);
   font-size: 0.867rem;
   line-height: 1.5;
-  background: var(--code-bg);
+  background: var(--inkkit-code-background);
   border-radius: 8px;
   padding: 0.8rem 0.933rem;
   margin: 0 0 0.8rem;
@@ -167,12 +150,12 @@ body {
     0.733rem/1 -apple-system,
     system-ui,
     sans-serif;
-  color: var(--muted);
+  color: var(--inkkit-muted-color);
   text-transform: lowercase;
   user-select: none;
 }
 
-.ProseMirror pre .copy {
+.ProseMirror pre .inkkit-copy {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -183,20 +166,20 @@ body {
   border: 0;
   border-radius: 6px;
   background: color-mix(in srgb, CanvasText 10%, transparent);
-  color: var(--muted);
+  color: var(--inkkit-muted-color);
   cursor: pointer;
   opacity: 0;
   transition: opacity 120ms;
   user-select: none;
 }
 
-.ProseMirror pre:hover .copy,
-.ProseMirror pre .copy[data-copied] {
+.ProseMirror pre:hover .inkkit-copy,
+.ProseMirror pre .inkkit-copy[data-copied] {
   opacity: 1;
 }
 
-.ProseMirror pre .copy:hover {
-  color: var(--text);
+.ProseMirror pre .inkkit-copy:hover {
+  color: var(--inkkit-text-color);
 }
 
 .ProseMirror pre code {
@@ -208,7 +191,7 @@ body {
 .ProseMirror blockquote {
   margin: 0 0 0.8rem;
   padding: 2px 0 2px 0.8rem;
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--inkkit-accent-color);
 }
 
 .ProseMirror blockquote > :first-child {
@@ -221,7 +204,7 @@ body {
 
 .ProseMirror hr {
   border: 0;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--inkkit-rule-color);
   margin: 1.333rem 0;
 }
 
@@ -247,7 +230,7 @@ body {
 
 .ProseMirror ul > li::marker,
 .ProseMirror ol > li::marker {
-  color: var(--accent);
+  color: var(--inkkit-accent-color);
 }
 
 .ProseMirror li[data-item-type="task"] {
@@ -269,8 +252,8 @@ body {
 }
 
 .ProseMirror li[data-item-type="task"][data-checked="true"]::before {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--inkkit-accent-color);
+  background: var(--inkkit-accent-color);
 }
 
 .ProseMirror li[data-item-type="task"][data-checked="true"]::after {
@@ -288,109 +271,34 @@ body {
 }
 
 .ProseMirror li[data-item-type="task"][data-checked="true"] > p {
-  color: var(--muted);
+  color: var(--inkkit-muted-color);
 }
 
 .ProseMirror del {
-  color: var(--muted);
+  color: var(--inkkit-muted-color);
 }
 
 .ProseMirror .ProseMirror-selectednode {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline: 2px solid
+    color-mix(in srgb, var(--inkkit-accent-color) 60%, transparent);
   outline-offset: 2px;
   border-radius: 4px;
-}
-
-/* Syntax colors: One Dark and One Light, without the blues. */
-:root {
-  --code-comment: var(--muted);
-  --code-keyword: #a626a4;
-  --code-string: #50a14f;
-  --code-number: #986801;
-  --code-title: #c18401;
-  --code-attr: #e45649;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --code-keyword: #c678dd;
-    --code-string: #98c379;
-    --code-number: #d19a66;
-    --code-title: #e5c07b;
-    --code-attr: #e06c75;
-  }
-}
-
-.hljs-comment,
-.hljs-quote {
-  color: var(--code-comment);
-  font-style: italic;
-}
-
-.hljs-keyword,
-.hljs-literal,
-.hljs-built_in,
-.hljs-type,
-.hljs-selector-tag,
-.hljs-doctag {
-  color: var(--code-keyword);
-}
-
-.hljs-string,
-.hljs-regexp,
-.hljs-addition,
-.hljs-template-tag {
-  color: var(--code-string);
-}
-
-.hljs-number,
-.hljs-symbol,
-.hljs-bullet,
-.hljs-link,
-.hljs-meta {
-  color: var(--code-number);
-}
-
-.hljs-title,
-.hljs-section,
-.hljs-name,
-.hljs-selector-id,
-.hljs-selector-class {
-  color: var(--code-title);
-}
-
-.hljs-attr,
-.hljs-attribute,
-.hljs-property,
-.hljs-variable,
-.hljs-template-variable,
-.hljs-tag,
-.hljs-deletion {
-  color: var(--code-attr);
-}
-
-.hljs-emphasis {
-  font-style: italic;
-}
-
-.hljs-strong {
-  font-weight: 700;
 }
 
 [hidden] {
   display: none !important;
 }
 .ProseMirror-search-match {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--inkkit-accent-color) 25%, transparent);
 }
 
 .ProseMirror-active-search-match {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--inkkit-accent-color) 55%, transparent);
 }
 
-.ProseMirror .literal-markdown {
+.ProseMirror .inkkit-literal-markdown {
   white-space: pre-wrap;
-  font-family: var(--mono);
+  font-family: var(--inkkit-monospace-font);
   font-size: 0.9rem;
 }
 

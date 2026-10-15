@@ -412,6 +412,34 @@ struct MarkdownBridgeTests {
         #expect(clipboard.html?.contains("<h2") == true)
     }
 
+    @Test func refusedEditReachesTheAppAndLeavesTheEditorUsable() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("Keep this text\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        var received: [PadMarkdownEditorError] = []
+        editor.onError = { if let error = $0 as? PadMarkdownEditorError { received.append(error) } }
+
+        // InkKit refuses an edit while text composition is active.
+        _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true})); true")
+        editor.pasteAsPlainText("typed")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while received.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        _ = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true})); true")
+
+        let refusal = try #require(received.first)
+        guard case .snapshotRejected(let code, let message) = refusal else {
+            Issue.record("Expected a refused edit, got \(refusal)")
+            return
+        }
+        #expect(code == "composition")
+        #expect(!message.isEmpty)
+        #expect(refusal.errorDescription?.isEmpty == false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(received.count == 1)
+        #expect(editor.isReady)
+        #expect(try await editor.snapshot() == nil)
+    }
+
     @Test func editingSurfaceRetainsViewportHeightAndTextSize() async throws {
         let editor = PadMarkdownEditorController()
         editor.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 480)
@@ -431,6 +459,27 @@ struct MarkdownBridgeTests {
         #expect(output?["fontSize"] as? String == "21px")
         #expect(output?["paddingTop"] as? String == "10px")
         #expect(output?["paddingBottom"] as? String == "48px")
+    }
+
+    @Test func readingWidthCentersTheWritingColumn() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.webView.frame = NSRect(x: 0, y: 0, width: 720, height: 480)
+        editor.load("Short paragraph\n", documentID: UUID())
+        _ = try await editor.snapshot()
+        let script = """
+            (() => {
+                const surface = document.querySelector('.ProseMirror');
+                const column = document.getElementById('editor').clientWidth;
+                return {left: parseFloat(getComputedStyle(surface).paddingLeft), column};
+            })()
+            """
+        editor.setReadingWidth(400)
+        let narrow = try #require(try await editor.webView.evaluateJavaScript(script) as? [String: Any])
+        let column = try #require(narrow["column"] as? Double)
+        #expect(abs(try #require(narrow["left"] as? Double) - ((column - 400) / 2 + 16)) < 0.5)
+        editor.setReadingWidth(nil)
+        let full = try #require(try await editor.webView.evaluateJavaScript(script) as? [String: Any])
+        #expect(full["left"] as? Double == 16)
     }
 
     @Test func nativeTextPrintUsesContentHeight() throws {
@@ -571,6 +620,7 @@ struct MarkdownBridgeTests {
         editor.load("Selected words", documentID: UUID())
         try await ready(editor)
         for level in 1...3 {
+            #expect(editor.formatAvailability["heading\(level)"] == true)
             editor.format(.heading, argument: String(level))
             _ = try await editor.snapshot()
             try await toolbarState(editor, contains: "heading\(level)", active: true)

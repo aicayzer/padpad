@@ -89,7 +89,8 @@ struct MarkdownBridgeTests {
         #expect(editor.ownsFirstResponder)
     }
 
-    @Test func firstNativeEndCommandAfterContentClickPreservesSpaceAndTyping() async throws {
+    @Test(arguments: [0, 30])
+    func firstNativeEndCommandAfterContentClickPreservesSpaceAndTyping(keyHandlerWork: Int) async throws {
         let suite = "pad-click-command-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set(true, forKey: "pad.onboardingCompleted")
@@ -131,6 +132,16 @@ struct MarkdownBridgeTests {
         document.querySelector('.ProseMirror').addEventListener('mousedown', event => {
           window.padClickWitness.push(event.isTrusted);
         }, true);
+        window.padKeyWitness = [];
+        document.addEventListener('keydown', event => {
+          window.padKeyWitness.push({key: event.key, trusted: event.isTrusted});
+          if (event.metaKey && event.key === 'ArrowDown') {
+            // Model a busy web-content turn so its pending focus check can run
+            // before the selectionchange caused by the native caret command.
+            const deadline = performance.now() + \(keyHandlerWork);
+            while (performance.now() < deadline) {}
+          }
+        }, true);
         true
         """)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -138,7 +149,7 @@ struct MarkdownBridgeTests {
         try #require(bounds.width > 40 && bounds.height > 40)
         let point = editor.webView.convert(NSPoint(x: 55,
                                                    y: editor.webView.isFlipped ? 20 : bounds.height - 20), to: nil)
-        // Do not await a DOM or snapshot round trip between the click and first command.
+        // Deliver a real content click, then press the first command as DOM focus arrives.
         for (number, type) in [NSEvent.EventType.leftMouseDown, .leftMouseUp].enumerated() {
             let click = try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                                                       timestamp: ProcessInfo.processInfo.systemUptime,
@@ -146,6 +157,18 @@ struct MarkdownBridgeTests {
                                                       eventNumber: number + 1, clickCount: 1, pressure: 1))
             NSApp.sendEvent(click)
         }
+        _ = try await editor.webView.callAsyncJavaScript("""
+        if (!document.hasFocus()) {
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Content did not gain focus')), 5000);
+            document.addEventListener('focus', () => {
+              clearTimeout(timeout);
+              resolve();
+            }, {capture: true, once: true});
+          });
+        }
+        return true;
+        """, arguments: [:], in: nil, contentWorld: .page)
         for (characters, flags, code) in [("\u{f701}", NSEvent.ModifierFlags.command, UInt16(125)), (" ", [], 49), ("q", [], 12)] {
             let key = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
                                                   timestamp: ProcessInfo.processInfo.systemUptime,
@@ -153,6 +176,8 @@ struct MarkdownBridgeTests {
                                                   characters: characters, charactersIgnoringModifiers: characters,
                                                   isARepeat: false, keyCode: code))
             NSApp.sendEvent(key)
+            // Leave the caret-only command observable before subsequent typing.
+            if code == 125 { try await Task.sleep(for: .milliseconds(40)) }
             await Task.yield()
         }
         let trusted = try await editor.webView.evaluateJavaScript("window.padClickWitness") as? [Bool]
@@ -168,6 +193,9 @@ struct MarkdownBridgeTests {
             try await Task.sleep(for: .milliseconds(20))
             finalSource = try await editor.snapshot()
         }
+        let deliveredKeys = try await editor.webView.evaluateJavaScript("window.padKeyWitness") as? [[String: Any]]
+        #expect(deliveredKeys?.compactMap { $0["key"] as? String } == ["ArrowDown", " ", "q"])
+        #expect(deliveredKeys?.allSatisfy { $0["trusted"] as? Bool == true } == true)
         #expect(finalSource == "Background document q")
         #expect(editor.ownsFirstResponder)
     }

@@ -2,6 +2,9 @@ import {
   InkKitEditor,
   InkKitError,
   type ClipboardOutput,
+  type FormatCommand,
+  type FormatOptions,
+  type TableCommand,
 } from "@aicayzer/inkkit";
 import "@aicayzer/inkkit/style.css";
 import "./style.css";
@@ -19,13 +22,11 @@ function post(message: Record<string, unknown>): void {
 
 const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
-let generation = 0;
 const clipboardReplies = new Map<
   string,
   { resolve(): void; reject(error: Error): void }
 >();
 function writeClipboard(output: ClipboardOutput): Promise<void> {
-  const scope = editor.snapshot();
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -45,8 +46,8 @@ function writeClipboard(output: ClipboardOutput): Promise<void> {
     post({
       type: "writeClipboard",
       requestId,
-      documentId: scope.documentId,
-      generation: scope.generation,
+      documentId: output.documentId,
+      generation: output.generation,
       text: output.text,
       html: output.html,
     });
@@ -55,14 +56,15 @@ function writeClipboard(output: ClipboardOutput): Promise<void> {
 const editor = await InkKitEditor.mount(
   root,
   {
-    changed(markdown, generation) {
-      post({ type: "changed", markdown, generation });
+    changed(snapshot) {
+      post({
+        type: "changed",
+        markdown: snapshot.text,
+        generation: snapshot.generation,
+      });
     },
     commandStateChanged(state) {
       post({ type: "commands", ...state });
-    },
-    stateChanged(state) {
-      post({ type: "state", ...state, generation });
     },
     openLink(href) {
       post({ type: "openLink", href });
@@ -83,17 +85,11 @@ function guardedCommand<T>(
   try {
     return action();
   } catch (error) {
+    // Any other rejection leaves the editor usable and the person's text untouched.
     if (
       error instanceof InkKitError &&
-      [
-        "not-ready",
-        "stale-document",
-        "composition",
-        "operation-pending",
-        "preservation",
-        "image-unavailable",
-        "diagram-unavailable",
-      ].includes(error.code)
+      error.code !== "destroyed" &&
+      error.code !== "internal"
     )
       return { commandError: error.code, message: error.message };
     throw error;
@@ -112,16 +108,24 @@ const facade = {
     nextGeneration: number,
     documentId = String(nextGeneration),
   ) {
-    generation = nextGeneration;
-    editor.loadDocument({ text, generation, documentId, format: "md" });
+    editor.loadDocument({
+      text,
+      generation: nextGeneration,
+      documentId,
+      format: "md",
+    });
   },
   reload(
     text: string,
     nextGeneration: number,
     documentId = String(nextGeneration),
   ) {
-    generation = nextGeneration;
-    editor.reloadDocument({ text, generation, documentId, format: "md" });
+    editor.reloadDocument({
+      text,
+      generation: nextGeneration,
+      documentId,
+      format: "md",
+    });
   },
   snapshot(expectedGeneration: number) {
     try {
@@ -132,7 +136,8 @@ const facade = {
       throw error;
     }
   },
-  clipboard: () => editor.clipboardSnapshot(true),
+  clipboard: (expected: number) =>
+    editor.clipboardSnapshot("document", expected),
   setEditingMode: (mode: "source" | "formatted", expected: number) =>
     guardedCommand(() => editor.setEditingMode(mode, expected)),
   undo: (expected: number) => guardedCommand(() => editor.undo(expected)),
@@ -160,34 +165,39 @@ const facade = {
       throw error;
     }
   },
-  format: editor.format.bind(editor),
+  format: (
+    command: FormatCommand,
+    options: FormatOptions | null,
+    expected: number,
+  ) =>
+    guardedCommand(() =>
+      editor.format(command, options ?? undefined, expected),
+    ),
   focus: editor.focus.bind(editor),
   find: (search: string, expected: number) =>
     guardedCommand(() => editor.find(search, expected)),
   insertText: editor.insertText.bind(editor),
   keyDown: editor.keyDown.bind(editor),
-  insertPaths: editor.insertPaths.bind(editor),
-  pasteAsPlainText: editor.pasteAsPlainText.bind(editor),
-  table: editor.table.bind(editor),
+  pasteAsPlainText: (text: string, expected: number) =>
+    guardedCommand(() => editor.pasteAsPlainText(text, expected)),
+  table: (command: TableCommand, expected: number) =>
+    guardedCommand(() => editor.table(command, undefined, expected)),
   setAccent: (color: string) =>
-    document.documentElement.style.setProperty("--accent", color),
+    document.documentElement.style.setProperty("--inkkit-accent-color", color),
   setTextSize: (px: number) =>
     document.documentElement.style.setProperty("font-size", `${px}px`),
   setReadingWidth: (width: number | null) => {
     if (width !== null && Number.isFinite(width) && width > 0)
       document.documentElement.style.setProperty(
-        "--reading-width",
+        "--inkkit-reading-width",
         `${width}px`,
       );
-    else document.documentElement.style.removeProperty("--reading-width");
+    else
+      document.documentElement.style.removeProperty("--inkkit-reading-width");
   },
   setKeymap: editor.setKeymap.bind(editor),
 };
 Object.assign(window, { editor: facade });
-for (const name of ["keydown", "keyup"] as const)
-  window.addEventListener(name, (event) =>
-    document.documentElement.classList.toggle("meta", event.metaKey),
-  );
 window.addEventListener("keydown", (event) => {
   if (
     event.metaKey &&
@@ -200,9 +210,6 @@ window.addEventListener("keydown", (event) => {
     post({ type: "requestLink" });
   }
 });
-window.addEventListener("blur", () =>
-  document.documentElement.classList.remove("meta"),
-);
 window.addEventListener("error", (event) =>
   post({ type: "error", message: event.message }),
 );

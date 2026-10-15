@@ -3,6 +3,7 @@ build/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+Pad.xcodeproj/xcshareddata/xcodecloud/
 Config/Local.xcconfig
 Config/Local.xcconfig.*
 Config/Cloud.xcconfig

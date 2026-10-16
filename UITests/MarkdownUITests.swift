@@ -179,6 +179,18 @@ final class MarkdownUITests: XCTestCase {
         defer { app.terminate() }
         waitForEditor(app)
         app.typeText("Selected text")
+        app.typeKey("f", modifierFlags: .command)
+        let find = app.textFields["Find"].firstMatch
+        XCTAssertTrue(find.waitForExistence(timeout: 5), app.debugDescription)
+        find.click()
+        app.menuBars.menuBarItems["Format"].click()
+        XCTAssertFalse(app.menuItems["Markdown Source"].firstMatch.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
+        // The Find bar may remain visible while the document owns input again.
+        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        app.menuBars.menuBarItems["Format"].click()
+        XCTAssertTrue(app.menuItems["Markdown Source"].firstMatch.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
         app.typeKey("a", modifierFlags: .command)
         let editorFrame = app.webViews.firstMatch.frame
         app.menuButtons["formattingMenu"].firstMatch.click()

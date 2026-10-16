@@ -134,7 +134,7 @@ final class PadMarkdownEditorController: NSObject {
         // AppKit focus is not observable. The panel invalidates this projection
         // whenever its first responder or key-window ownership changes.
         _ = keyboardFocusRevision
-        return isReady && !showingFind && !showingLink
+        return isReady
             && webView.window?.isKeyWindow == true && ownsFirstResponder
     }
 

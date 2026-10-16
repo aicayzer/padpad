@@ -488,7 +488,8 @@ final class MarkdownUITests: XCTestCase {
         let link = app.textFields["Link URL"].firstMatch
         XCTAssertTrue(link.waitForExistence(timeout: 5), app.debugDescription)
         link.click()
-        app.typeText("https://example.com")
+        paste("https://example.com", into: app)
+        XCTAssertEqual(link.value as? String, "https://example.com", "Native link input before editor shortcuts")
         app.typeKey(.downArrow, modifierFlags: .option)
         app.typeKey("b", modifierFlags: .command)
         XCTAssertEqual(link.value as? String, "https://example.com")
@@ -500,16 +501,14 @@ final class MarkdownUITests: XCTestCase {
         let app = launchPad()
         defer { app.terminate() }
         waitForEditor(app)
-        app.typeText("| A | B |")
-        app.typeKey(.return, modifierFlags: [])
-        app.menuBars.menuBarItems["Edit"].click()
-        app.menuItems["Copy as Markdown"].firstMatch.click()
-        let table = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let text = NSPasteboard.general.string(forType: .string) ?? ""
-            return text.contains("| A | B |") && text.components(separatedBy: "\n").count >= 3
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [table], timeout: 5), .completed)
-        attach(app.screenshot(), name: "Typed table header converted by Return")
+        for key in [XCUIKeyboardKey.return, .tab] {
+            app.typeKey("a", modifierFlags: .command)
+            app.typeKey(.delete, modifierFlags: [])
+            app.typeText("| A | B |")
+            app.typeKey(key, modifierFlags: [])
+            copyMarkdown(app, expecting: "| A | B |\n| - | - |\n|   |   |\n")
+            attach(app.screenshot(), name: "Typed table header converted by \(key.rawValue)")
+        }
 
         for (source, expected) in [("Paragraph", "Paragraph\\\nnext"),
                                    ("- [ ] Task", "- [ ] Task\\\n  next"),
@@ -521,7 +520,7 @@ final class MarkdownUITests: XCTestCase {
             app.typeText("next")
             app.menuBars.menuBarItems["Edit"].click()
             app.menuItems["Copy as Markdown"].firstMatch.click()
-            waitForClipboard(expected)
+            waitForClipboard(expected + "\n")
             XCTAssertFalse(app.staticTexts["editorFeedback"].exists)
             XCTAssertFalse(app.staticTexts["documentError"].exists)
             let result = try XCTUnwrap(NSPasteboard.general.string(forType: .string))
@@ -541,7 +540,8 @@ final class MarkdownUITests: XCTestCase {
     private func copyMarkdown(_ app: XCUIApplication, expecting text: String) {
         app.menuBars.menuBarItems["Edit"].click()
         app.menuItems["Copy as Markdown"].firstMatch.click()
-        waitForClipboard(text)
+        // These edited fixtures are serialized by InkKit with a final newline.
+        waitForClipboard(text.hasSuffix("\n") ? text : text + "\n")
     }
 
     private func waitForClipboard(_ expected: String) {

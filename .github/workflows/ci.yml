@@ -72,7 +72,7 @@ jobs:
               "-only-testing:PadTests/$suite" \
               CODE_SIGNING_ALLOWED=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test | tee -a build.log
           done
-      - name: Test application interactions
+      - name: Test editor interactions
         if: github.event_name != 'workflow_dispatch' || inputs.window_tests
         timeout-minutes: 30
         run: |
@@ -80,7 +80,22 @@ jobs:
           sudo /usr/sbin/DevToolsSecurity -enable
           xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tests' -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath build/UI \
+            -resultBundlePath build/EditorUI.xcresult -parallel-testing-enabled NO \
+            -only-testing:PadUITests/MarkdownUITests/testFormattingMenuPreservesSelectionAndEditorLayout \
+            -only-testing:PadUITests/MarkdownUITests/testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory \
+            -only-testing:PadUITests/MarkdownUITests/testInkKit012NativeTableBreaksPunctuationAndLayout \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test | tee -a build.log
+      - name: Test remaining application interactions
+        if: github.event_name != 'workflow_dispatch' || inputs.window_tests
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tests' -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath build/UI \
             -resultBundlePath build/UI.xcresult -parallel-testing-enabled NO \
+            -skip-testing:PadUITests/MarkdownUITests/testFormattingMenuPreservesSelectionAndEditorLayout \
+            -skip-testing:PadUITests/MarkdownUITests/testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory \
+            -skip-testing:PadUITests/MarkdownUITests/testInkKit012NativeTableBreaksPunctuationAndLayout \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test | tee -a build.log
       - name: Build Release
         run: |

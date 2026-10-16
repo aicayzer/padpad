@@ -986,6 +986,57 @@ struct MarkdownBridgeTests {
         #expect(captured?.trimmingCharacters(in: .whitespacesAndNewlines) == "Im")
     }
 
+    @Test func bufferedTypingKeepsInkKitSmartPunctuationDisabled() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("", documentID: UUID())
+        _ = try await editor.snapshot()
+        let text = "\"plain\" -- ..."
+        let encoded = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)
+        // Send each character through the public typing facade, which applies
+        // InkKit's input rules without involving macOS text substitutions.
+        _ = try await editor.webView.evaluateJavaScript("""
+        for (const character of \(encoded)) window.editor.insertText(character, 1);
+        true
+        """)
+        #expect(try await editor.snapshot() == text + "\n")
+    }
+
+    @Test(arguments: ["Find", "Replace", "Link URL"])
+    func editorKeyEquivalentsDoNotStealNativeFieldInput(fieldName: String) async throws {
+        let editor = PadMarkdownEditorController()
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 480),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let content = NSView(frame: window.contentLayoutRect)
+        editor.webView.frame = NSRect(x: 0, y: 60, width: 600, height: 400)
+        content.addSubview(editor.webView)
+        let field = NSTextField(frame: NSRect(x: 20, y: 15, width: 300, height: 24))
+        field.placeholderString = fieldName
+        field.stringValue = "Native field"
+        content.addSubview(field)
+        window.contentView = content
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil; window.close() }
+        editor.load("First\n\nSecond", documentID: UUID())
+        try await ready(editor)
+        editor.focus()
+        _ = try await editor.snapshot()
+        field.selectText(nil)
+        try #require(window.firstResponder is NSTextView)
+        #expect(!editor.ownsFirstResponder)
+        #expect(!editor.canPerformMenuCommands)
+        for (key, code, modifiers) in [("\u{f700}", UInt16(126), NSEvent.ModifierFlags.option),
+                                       ("\u{f701}", 125, .option), ("b", 11, .command), ("z", 6, .command)] {
+            let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: code))
+            #expect(!editor.webView.performKeyEquivalent(with: event))
+        }
+        #expect(try await editor.webView.evaluateJavaScript("window.editor.snapshot(1).text") as? String == "First\n\nSecond")
+        #expect(field.stringValue == "Native field")
+    }
+
     private func ready(_ editor: PadMarkdownEditorController) async throws {
         let deadline = ContinuousClock.now + .seconds(15)
         while !editor.isReady, ContinuousClock.now < deadline {

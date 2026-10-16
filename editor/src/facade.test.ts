@@ -121,11 +121,12 @@ describe("native bridge facade", () => {
   });
 
   it("reports a preservation refusal to the app and not as a warning", () => {
-    facade.load("", 7, "table");
-    expect(facade.table("insert", 7)).toBe(true);
+    facade.load("A <!--note--> B\n", 7, "preserved-comment");
     const before = facade.snapshot(7).text;
     const warnings = posted.filter((entry) => entry.type === "editorWarning");
-    const refusal = facade.insertText("one\ntwo", 7);
+    // A code block cannot retain the hidden comment. Table multiline input is
+    // supported by InkKit 0.1.2 and is no longer a refusal fixture.
+    const refusal = facade.format("codeBlock", null, 7);
     expect(refusal).toMatchObject({
       commandError: "preservation",
       message: expect.stringMatching(/\S/),

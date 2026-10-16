@@ -50,6 +50,16 @@ import Testing
         #expect(shortcuts.validateGlobal(.init(.c, modifiers: [.command, .shift])) != .allow)
     }
 
+    @Test func globalRecorderAllowsOptionArrowShortcuts() throws {
+        let name = "pad-option-arrows-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let shortcuts = EditingShortcuts(defaults: defaults, globalShortcut: { nil })
+        for key in [KeyboardShortcuts.Key.upArrow, .downArrow] {
+            #expect(shortcuts.validateGlobal(.init(key, modifiers: .option)) == .allow)
+        }
+    }
+
     @Test func restoreIsAtomicWhenGlobalNowUsesADefault() throws {
         let name = "pad-shortcuts-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))

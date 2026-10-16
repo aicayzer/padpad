@@ -179,12 +179,26 @@ final class MarkdownUITests: XCTestCase {
         defer { app.terminate() }
         waitForEditor(app)
         app.typeText("Selected text")
+        app.typeKey("f", modifierFlags: .command)
+        let find = app.textFields["Find"].firstMatch
+        XCTAssertTrue(find.waitForExistence(timeout: 5), app.debugDescription)
+        find.click()
+        app.menuBars.menuBarItems["Format"].click()
+        XCTAssertFalse(app.menuItems["Markdown Source"].firstMatch.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
+        // The Find bar may remain visible while the document owns input again.
+        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        app.menuBars.menuBarItems["Format"].click()
+        XCTAssertTrue(app.menuItems["Markdown Source"].firstMatch.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
         app.typeKey("a", modifierFlags: .command)
         let editorFrame = app.webViews.firstMatch.frame
         app.menuButtons["formattingMenu"].firstMatch.click()
-        app.menuItems["Text style"].firstMatch.click()
-        let bold = app.menuItems["Bold"].firstMatch
-        XCTAssertTrue(bold.waitForExistence(timeout: 5), app.debugDescription)
+        let textStyle = try XCTUnwrap(app.menuItems.matching(identifier: "Text style").allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
+        XCTAssertTrue(textStyle.isEnabled)
+        textStyle.click()
+        let bold = try XCTUnwrap(app.menuItems.matching(identifier: "Bold").allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
+        XCTAssertTrue(bold.isEnabled)
         bold.click()
         XCTAssertEqual(app.webViews.firstMatch.frame.minY, editorFrame.minY, accuracy: 1)
         XCTAssertEqual(app.webViews.firstMatch.frame.height, editorFrame.height, accuracy: 1)
@@ -435,6 +449,106 @@ final class MarkdownUITests: XCTestCase {
         app.typeKey("c", modifierFlags: [.command, .shift])
         waitForClipboard(expected)
         attach(fileWindow.screenshot(), name: "Edited Markdown reopened with separate soft-break lines")
+    }
+
+    func testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory() throws {
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        paste("First\n\nSecond\n\nThird", into: app)
+        app.typeKey(.upArrow, modifierFlags: .command)
+        app.typeKey(.downArrow, modifierFlags: .option)
+        copyMarkdown(app, expecting: "Second\n\nFirst\n\nThird")
+        app.menuBars.menuBarItems["Edit"].click()
+        app.menuItems["Undo"].firstMatch.click()
+        copyMarkdown(app, expecting: "First\n\nSecond\n\nThird")
+        app.menuBars.menuBarItems["Edit"].click()
+        app.menuItems["Redo"].firstMatch.click()
+        copyMarkdown(app, expecting: "Second\n\nFirst\n\nThird")
+
+        app.typeKey("f", modifierFlags: .command)
+        let find = app.textFields["Find"].firstMatch
+        XCTAssertTrue(find.waitForExistence(timeout: 5), app.debugDescription)
+        find.click()
+        app.typeText("Native find")
+        app.typeKey(.upArrow, modifierFlags: .option)
+        app.typeKey("b", modifierFlags: .command)
+        app.menuBars.menuBarItems["Format"].click()
+        XCTAssertFalse(app.menuItems["Markdown Source"].firstMatch.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertEqual(find.value as? String, "Native find")
+        let replacement = app.textFields["Replace"].firstMatch
+        replacement.click()
+        app.typeText("Native replacement")
+        app.typeKey(.downArrow, modifierFlags: .option)
+        app.typeKey("i", modifierFlags: .command)
+        XCTAssertEqual(replacement.value as? String, "Native replacement")
+        copyMarkdown(app, expecting: "Second\n\nFirst\n\nThird")
+        app.buttons["Done"].firstMatch.click()
+
+        app.typeKey("k", modifierFlags: .command)
+        let link = app.textFields["Link URL"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5), app.debugDescription)
+        link.click()
+        paste("https://example.com", into: app)
+        XCTAssertEqual(link.value as? String, "https://example.com", "Native link input before editor shortcuts")
+        app.typeKey(.downArrow, modifierFlags: .option)
+        app.typeKey("b", modifierFlags: .command)
+        XCTAssertEqual(link.value as? String, "https://example.com")
+        app.buttons["Cancel"].firstMatch.click()
+        copyMarkdown(app, expecting: "Second\n\nFirst\n\nThird")
+    }
+
+    func testInkKit012NativeTableBreaksPunctuationAndLayout() throws {
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        for key in [XCUIKeyboardKey.return, .tab] {
+            app.typeKey("a", modifierFlags: .command)
+            app.typeKey(.delete, modifierFlags: [])
+            app.typeText("| A | B |")
+            app.typeKey(key, modifierFlags: [])
+            copyMarkdown(app, expecting: "| A | B |\n| - | - |\n|   |   |\n")
+            attach(app.screenshot(), name: "Typed table header converted by \(key.rawValue)")
+        }
+
+        for (source, expected) in [("Paragraph", "Paragraph\\\nnext"),
+                                   ("- [ ] Task", "- [ ] Task\\\n  next"),
+                                   ("**Bold**", "**Bold**\\\nnext")] {
+            app.typeKey("a", modifierFlags: .command)
+            paste(source, into: app)
+            app.typeKey(.downArrow, modifierFlags: .command)
+            app.typeKey(.return, modifierFlags: .shift)
+            app.typeText("next")
+            app.menuBars.menuBarItems["Edit"].click()
+            app.menuItems["Copy as Markdown"].firstMatch.click()
+            waitForClipboard(expected + "\n")
+            XCTAssertFalse(app.staticTexts["editorFeedback"].exists)
+            XCTAssertFalse(app.staticTexts["documentError"].exists)
+            let result = try XCTUnwrap(NSPasteboard.general.string(forType: .string))
+            app.typeKey("a", modifierFlags: .command)
+            paste(result, into: app)
+            copyMarkdown(app, expecting: result)
+        }
+        app.typeKey("a", modifierFlags: .command)
+        // Native typing honors macOS substitutions. Pasted source stays literal;
+        // the bridge suite separately checks InkKit's typed input rules.
+        paste("\"plain\" -- ...", into: app)
+        copyMarkdown(app, expecting: "\"plain\" -- ...")
+        app.typeKey("a", modifierFlags: .command)
+        paste("| A | B |\n| - | - |\n| one | two |\n\n- [ ] Unchecked\n- [x] Checked\n- [ ] \n", into: app)
+        app.typeKey(.upArrow, modifierFlags: .command)
+        let tableHeader = app.webViews.firstMatch.staticTexts["A"].firstMatch
+        XCTAssertTrue(tableHeader.waitForExistence(timeout: 5), app.debugDescription)
+        tableHeader.hover()
+        attach(app.screenshot(), name: "InkKit table grabbers and nonempty and empty task items")
+    }
+
+    private func copyMarkdown(_ app: XCUIApplication, expecting text: String) {
+        app.menuBars.menuBarItems["Edit"].click()
+        app.menuItems["Copy as Markdown"].firstMatch.click()
+        // These edited fixtures are serialized by InkKit with a final newline.
+        waitForClipboard(text.hasSuffix("\n") ? text : text + "\n")
     }
 
     private func waitForClipboard(_ expected: String) {

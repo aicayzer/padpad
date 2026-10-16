@@ -126,6 +126,18 @@ final class PadMarkdownEditorController: NSObject {
         return view === webView || view.isDescendant(of: webView)
     }
 
+    private var keyboardFocusRevision = 0
+
+    func keyboardFocusDidChange() { keyboardFocusRevision &+= 1 }
+
+    var canPerformMenuCommands: Bool {
+        // AppKit focus is not observable. The panel invalidates this projection
+        // whenever its first responder or key-window ownership changes.
+        _ = keyboardFocusRevision
+        return isReady
+            && webView.window?.isKeyWindow == true && ownsFirstResponder
+    }
+
     override init() {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -305,13 +317,13 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func contentWasClicked() {
-        guard isReady, focusTask == nil, !showingFind, pendingEvents.isEmpty,
+        guard isReady, focusTask == nil, pendingEvents.isEmpty,
               inputBuffer.eventCount == 0, !inputBuffer.isComposing else { return }
         hasFocusedDocument = true
     }
 
     func capturePendingInput(_ event: NSEvent) -> Bool {
-        guard ownsFirstResponder, !showingFind, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
+        guard ownsFirstResponder, (!hasFocusedDocument || focusTask != nil), event.type == .keyDown,
               let window = webView.window else { return false }
         // A mounted WebKit view can receive keys before its editable DOM has focus.
         inputBuffer.attach(to: window)
@@ -646,6 +658,15 @@ extension PadMarkdownEditorController: WKNavigationDelegate {
 
 @MainActor
 private final class PadMarkdownWebView: WKWebView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // AppKit traverses subviews for key equivalents even when a native field
+        // owns focus. Only the focused editor may handle its editing shortcuts.
+        guard let window, window.isKeyWindow,
+              let responder = window.firstResponder as? NSView,
+              responder === self || responder.isDescendant(of: self) else { return false }
+        return super.performKeyEquivalent(with: event)
+    }
+
     var onAttach: () -> Void = {}
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

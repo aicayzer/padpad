@@ -142,6 +142,10 @@ final class OverlayTextField: NSTextField {
         guard outsideClickMonitor == nil else { return }
         outsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self, self.hasFocused, self.isCurrent(), let window = self.window else { return event }
+            // Find can stay visible after focus returns to the document. Its
+            // monitor must not clear another control's responder on later clicks.
+            guard window.firstResponder === self ||
+                  self.currentEditor().map({ window.firstResponder === $0 }) == true else { return event }
             let inside = event.window === window && self.bounds.contains(self.convert(event.locationInWindow, from: nil))
             guard !inside else { return event }
             // A blank part of the header needn't become a responder to finish renaming.

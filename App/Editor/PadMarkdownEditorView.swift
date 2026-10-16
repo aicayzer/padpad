@@ -30,7 +30,7 @@ struct PadMarkdownToolbar: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .controlSize(.small)
-        .disabled(!editor.isReady || editor.editingMode != "formatted")
+        .disabled(!editor.canPerformMenuCommands || editor.editingMode != "formatted")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Markdown formatting")
         .accessibilityIdentifier("markdownFormatting")

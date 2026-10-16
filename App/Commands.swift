@@ -76,10 +76,10 @@ struct AppCommands: Commands {
             if document.currentFormat == .md, let editor = document.markdownEditor {
                 Toggle("Markdown Source", isOn: Binding(get: { editor.editingMode == "source" },
                     set: { editor.setEditingMode($0 ? "source" : "formatted") }))
-                    .disabled(!canEdit || !editor.isReady)
+                    .disabled(!canEdit || !editor.canPerformMenuCommands)
                 Divider()
                 PadMarkdownToolbar(editor: editor).menuCommands
-                    .disabled(!canEdit || !editor.isReady)
+                    .disabled(!canEdit || !editor.canPerformMenuCommands)
             }
         }
         CommandGroup(after: .windowSize) {

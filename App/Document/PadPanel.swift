@@ -369,6 +369,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
 
     override func becomeKey() {
         super.becomeKey()
+        files.markdownEditor?.keyboardFocusDidChange()
         files.workspace?.didFocus(files)
         files.refreshIfNeeded()
         files.settingsPresented = false
@@ -386,6 +387,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
 
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
         let result = super.makeFirstResponder(responder)
+        if result { files.markdownEditor?.keyboardFocusDidChange() }
         if result, let editor = responder as? NSTextView,
            !(editor is MarkdownInputBuffer), !editor.isFieldEditor {
             // SwiftUI must finish mounting the editor and its binding before replaying input.
@@ -405,6 +407,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
 
     override func resignKey() {
         super.resignKey()
+        files.markdownEditor?.keyboardFocusDidChange()
         pendingTitleInput.discardEvents()
         files.isActive = false
         files.lostFocus()
@@ -532,6 +535,7 @@ struct PadView: View {
                                     } else {
                                         Menu {
                                             PadMarkdownToolbar(editor: editor).menuCommands
+                                                .disabled(!editor.canPerformMenuCommands)
                                         } label: {
                                             Image(systemName: "textformat").frame(width: 16)
                                         }

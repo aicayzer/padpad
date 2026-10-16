@@ -194,9 +194,11 @@ final class MarkdownUITests: XCTestCase {
         app.typeKey("a", modifierFlags: .command)
         let editorFrame = app.webViews.firstMatch.frame
         app.menuButtons["formattingMenu"].firstMatch.click()
-        app.menuItems["Text style"].firstMatch.click()
-        let bold = app.menuItems["Bold"].firstMatch
-        XCTAssertTrue(bold.waitForExistence(timeout: 5), app.debugDescription)
+        let textStyle = try XCTUnwrap(app.menuItems["Text style"].allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
+        XCTAssertTrue(textStyle.isEnabled)
+        textStyle.click()
+        let bold = try XCTUnwrap(app.menuItems["Bold"].allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
+        XCTAssertTrue(bold.isEnabled)
         bold.click()
         XCTAssertEqual(app.webViews.firstMatch.frame.minY, editorFrame.minY, accuracy: 1)
         XCTAssertEqual(app.webViews.firstMatch.frame.height, editorFrame.height, accuracy: 1)
@@ -529,7 +531,9 @@ final class MarkdownUITests: XCTestCase {
             copyMarkdown(app, expecting: result)
         }
         app.typeKey("a", modifierFlags: .command)
-        app.typeText("\"plain\" -- ...")
+        // Native typing honors macOS substitutions. Pasted source stays literal;
+        // the bridge suite separately checks InkKit's typed input rules.
+        paste("\"plain\" -- ...", into: app)
         copyMarkdown(app, expecting: "\"plain\" -- ...")
         app.typeKey("a", modifierFlags: .command)
         paste("| A | B |\n| - | - |\n| one | two |\n\n- [ ] Unchecked\n- [x] Checked\n- [ ] \n", into: app)

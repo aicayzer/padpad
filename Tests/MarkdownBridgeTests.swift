@@ -986,6 +986,21 @@ struct MarkdownBridgeTests {
         #expect(captured?.trimmingCharacters(in: .whitespacesAndNewlines) == "Im")
     }
 
+    @Test func bufferedTypingKeepsInkKitSmartPunctuationDisabled() async throws {
+        let editor = PadMarkdownEditorController()
+        editor.load("", documentID: UUID())
+        _ = try await editor.snapshot()
+        let text = "\"plain\" -- ..."
+        let encoded = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)
+        // Send each character through the public typing facade, which applies
+        // InkKit's input rules without involving macOS text substitutions.
+        _ = try await editor.webView.evaluateJavaScript("""
+        for (const character of \(encoded)) window.editor.insertText(character, 1);
+        true
+        """)
+        #expect(try await editor.snapshot() == text + "\n")
+    }
+
     @Test(arguments: ["Find", "Replace", "Link URL"])
     func editorKeyEquivalentsDoNotStealNativeFieldInput(fieldName: String) async throws {
         let editor = PadMarkdownEditorController()

@@ -124,7 +124,7 @@ const editor = await InkKitEditor.mount(
     },
     clipboard: writeClipboard,
   },
-  {},
+  { textInput: { smartPunctuation: false } },
 );
 function guardedCommand<T>(
   action: () => T,

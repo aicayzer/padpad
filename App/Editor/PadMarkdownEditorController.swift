@@ -126,6 +126,18 @@ final class PadMarkdownEditorController: NSObject {
         return view === webView || view.isDescendant(of: webView)
     }
 
+    private var keyboardFocusRevision = 0
+
+    func keyboardFocusDidChange() { keyboardFocusRevision &+= 1 }
+
+    var canPerformMenuCommands: Bool {
+        // AppKit focus is not observable. The panel invalidates this projection
+        // whenever its first responder or key-window ownership changes.
+        _ = keyboardFocusRevision
+        return isReady && !showingFind && !showingLink
+            && webView.window?.isKeyWindow == true && ownsFirstResponder
+    }
+
     override init() {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -646,6 +658,15 @@ extension PadMarkdownEditorController: WKNavigationDelegate {
 
 @MainActor
 private final class PadMarkdownWebView: WKWebView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // AppKit traverses subviews for key equivalents even when a native field
+        // owns focus. Only the focused editor may handle its editing shortcuts.
+        guard let window, window.isKeyWindow,
+              let responder = window.firstResponder as? NSView,
+              responder === self || responder.isDescendant(of: self) else { return false }
+        return super.performKeyEquivalent(with: event)
+    }
+
     var onAttach: () -> Void = {}
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

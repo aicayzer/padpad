@@ -194,10 +194,10 @@ final class MarkdownUITests: XCTestCase {
         app.typeKey("a", modifierFlags: .command)
         let editorFrame = app.webViews.firstMatch.frame
         app.menuButtons["formattingMenu"].firstMatch.click()
-        let textStyle = try XCTUnwrap(app.menuItems["Text style"].allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
+        let textStyle = try XCTUnwrap(app.menuItems.matching(identifier: "Text style").allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
         XCTAssertTrue(textStyle.isEnabled)
         textStyle.click()
-        let bold = try XCTUnwrap(app.menuItems["Bold"].allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
+        let bold = try XCTUnwrap(app.menuItems.matching(identifier: "Bold").allElementsBoundByIndex.first(where: \.isHittable), app.debugDescription)
         XCTAssertTrue(bold.isEnabled)
         bold.click()
         XCTAssertEqual(app.webViews.firstMatch.frame.minY, editorFrame.minY, accuracy: 1)

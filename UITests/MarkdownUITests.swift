@@ -534,6 +534,9 @@ final class MarkdownUITests: XCTestCase {
         app.typeKey("a", modifierFlags: .command)
         paste("| A | B |\n| - | - |\n| one | two |\n\n- [ ] Unchecked\n- [x] Checked\n- [ ] \n", into: app)
         app.typeKey(.upArrow, modifierFlags: .command)
+        let tableHeader = app.webViews.firstMatch.staticTexts["A"].firstMatch
+        XCTAssertTrue(tableHeader.waitForExistence(timeout: 5), app.debugDescription)
+        tableHeader.hover()
         attach(app.screenshot(), name: "InkKit table grabbers and nonempty and empty task items")
     }
 

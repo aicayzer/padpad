@@ -35,6 +35,6 @@ pnpm test
 pnpm build
 ```
 
-Use the shared Pad scheme for native build and tests. Window tests require an isolated GUI session and `PAD_WINDOW_TESTS` in the test host environment. Use disposable files, never personal documents. Required CI must pass before merging a pull request; native interaction checks are also needed for changes to focus, save, rename, close, or window behavior.
+Use the shared Pad scheme for native build and tests. Window tests require an isolated GUI session and `PAD_WINDOW_TESTS` in the test host environment. UI tests launch the app with macOS inline predictions off (`UITests/UITestLaunch.swift`), because the prediction panel consumes synthesized key events and can duplicate a typed character. Use disposable files, never personal documents. Required CI must pass before merging a pull request; native interaction checks are also needed for changes to focus, save, rename, close, or window behavior.
 
 Public pull requests use hosted CI. Do not attach personal persistent runners.

@@ -35,6 +35,7 @@ final class GlobalShortcutUITests: XCTestCase {
                                "-pad.saveAutomatically", "NO", "-pad.floating", "YES",
                                "-showInDock", "NO", "-menuBarItem", "YES",
                                "-KeyboardShortcuts_pad", #""{\"carbonKeyCode\":11,\"carbonModifiers\":2560}""#]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         defer { app.terminate() }
         let bundle = try XCTUnwrap(Bundle(for: Self.self).bundleIdentifier)
@@ -632,6 +633,7 @@ final class PadUITests: XCTestCase {
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", "txt", "-pad.saveAutomatically", "NO", "-pad.floating", "YES",
                                "-showInDock", "NO", "-menuBarItem", "YES", "-pad.editingShortcuts", "invalid",
                                "-KeyboardShortcuts_pad", #""{\"carbonKeyCode\":11,\"carbonModifiers\":6400}""#]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         defer { app.terminate() }
         let editor = app.textViews.firstMatch
@@ -780,6 +782,7 @@ final class PadUITests: XCTestCase {
                                "-pad.saveAutomatically", "NO", "-pad.floating", "YES",
                                "-showInDock", "YES", "-menuBarItem", "NO",
                                "-KeyboardShortcuts_pad", #""{\"carbonKeyCode\":11,\"carbonModifiers\":2560}""#]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         defer { app.terminate() }
         let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
@@ -861,6 +864,7 @@ final class PadUITests: XCTestCase {
                                "-showInDock", "YES", "-menuBarItem", "NO",
                                "-pad.editingShortcuts", "invalid",
                                "-KeyboardShortcuts_pad", #""{\"carbonKeyCode\":35,\"carbonModifiers\":6912}""#]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         XCTAssertFalse(app.textViews.firstMatch.exists, "Initial launch must keep the draft hidden")
         app.typeKey("n", modifierFlags: .command)

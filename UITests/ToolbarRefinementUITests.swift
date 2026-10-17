@@ -147,6 +147,7 @@ final class ToolbarRefinementUITests: XCTestCase {
                                "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
                                "-quickPadWidth", "740", "-quickPadHeight", "480",
                                "-showInDock", "YES", "-menuBarItem", "NO", "-showFormatToggle", "YES", "-appearance", appearance]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         app.typeKey("n", modifierFlags: .command)
         return app

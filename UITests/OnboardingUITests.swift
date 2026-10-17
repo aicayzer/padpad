@@ -305,6 +305,7 @@ final class OnboardingUITests: XCTestCase {
             "-pad.editingShortcuts", "invalid",
             "-KeyboardShortcuts_pad", globalShortcutEnabled ? #""{\"carbonKeyCode\":35,\"carbonModifiers\":6912}""# : "NO",
         ]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         XCTAssertFalse(element("onboardingIntro", in: app).exists, "Initial launch must remain hidden")
         XCTAssertFalse(app.buttons["documentFormat"].exists, "Initial launch must not open a draft")

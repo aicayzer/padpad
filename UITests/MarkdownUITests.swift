@@ -564,6 +564,7 @@ final class MarkdownUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", "md", "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
                                "-showInDock", "YES", "-menuBarItem", "NO", "-pad.editingShortcuts", "invalid"]
+        app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         app.typeKey("n", modifierFlags: .command)
         return app

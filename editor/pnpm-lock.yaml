@@ -8,8 +8,8 @@ importers:
   .:
     dependencies:
       "@aicayzer/inkkit":
-        specifier: 0.1.2
-        version: 0.1.2
+        specifier: 0.1.4
+        version: 0.1.4
     devDependencies:
       "@types/node":
         specifier: ^26.6.2
@@ -34,10 +34,10 @@ importers:
         version: 5.0.1(@types/node@26.6.2)(jsdom@30.1.0)(vite@8.3.0(@types/node@26.6.2))
 
 packages:
-  "@aicayzer/inkkit@0.1.2":
+  "@aicayzer/inkkit@0.1.4":
     resolution:
       {
-        integrity: sha512-qT6qvj1Sv0Lgyg0Qe8mAxCom2vaoYBztCeFpDSV2otViGUczzsWFi6kolQZv2p7BrmEk4auyYuLoyrIriBdGOg==,
+        integrity: sha512-Z95lZMCGQ1zEmNcBL2Ksy3TGMy60DPy/Je+58hvVSaKfVnedBtE87RtWUnXuaCSJZtDEqp6Op1c6QufABcRm5g==,
       }
     engines: { node: ">=22.14" }
 
@@ -1899,7 +1899,7 @@ packages:
       }
 
 snapshots:
-  "@aicayzer/inkkit@0.1.2":
+  "@aicayzer/inkkit@0.1.4":
     dependencies:
       mermaid: 12.1.0
 

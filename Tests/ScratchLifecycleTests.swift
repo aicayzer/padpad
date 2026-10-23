@@ -287,6 +287,15 @@ import Testing
         #expect(document.url?.lastPathComponent != "Untitled.md")
     }
 
+    @Test func recoveryGuidanceHasItsOwnCompactLine() {
+        let warning = PadWarningContent("This file is no longer available. Your text is still open. Choose “Save As” to keep a copy.")
+        #expect(warning.message == "This file is no longer available.")
+        #expect(warning.guidance == "Choose “Save As” to keep a copy.")
+        let edit = PadWarningContent("Couldn’t apply that edit. Your text is unchanged.")
+        #expect(edit.guidance == nil)
+        #expect(edit.message == "Couldn’t apply that edit. Your text is unchanged.")
+    }
+
     @Test func terminationWaitsForSnapshotAndRefusesSnapshotFailure() async throws {
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }

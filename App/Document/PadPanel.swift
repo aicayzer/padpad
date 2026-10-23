@@ -442,7 +442,15 @@ struct PadView: View {
                                   onSkip: { files.finishOnboarding(includeExample: false) },
                                   onClose: { files.close() })
             } else {
-                editorContent
+                VStack(spacing: 10) {
+                    editorContent
+                    if let message = files.error {
+                        detachedWarning(message, identifier: "documentError")
+                    } else if let feedback = files.editorFeedback {
+                        detachedWarning(feedback.message, identifier: "editorFeedback",
+                                        dismiss: { files.dismissEditorFeedback() })
+                    }
+                }
             }
         }
         .tint(settings.accentColor)
@@ -610,31 +618,8 @@ struct PadView: View {
                         .padding([.horizontal, .top], 10)
                 }
                 HStack(alignment: .bottom, spacing: 12) {
-                    if let message = files.error {
-                        documentMessage(message, identifier: "documentError", warning: true)
-                    } else if let feedback = files.editorFeedback {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Label(feedback.message, systemImage: "exclamationmark.triangle.fill")
-                                .labelStyle(.titleAndIcon)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("editorFeedback")
-                            Button("Dismiss Message", systemImage: "xmark") {
-                                files.dismissEditorFeedback()
-                            }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.plain)
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                            .help("Dismiss message")
-                            .accessibilityIdentifier("dismissEditorFeedback")
-                        }
-                        .font(.system(size: 13))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 10))
-                    } else if let message = files.notice {
-                        documentMessage(message, identifier: "documentNotice", warning: false)
+                    if files.error == nil, files.editorFeedback == nil, let message = files.notice {
+                        documentMessage(message, identifier: "documentNotice")
                     }
                     Spacer(minLength: 0)
                     if settings.showFormatToggle, files.isQuickPad, files.url == nil {
@@ -658,19 +643,20 @@ struct PadView: View {
         }
     }
 
-    private func documentMessage(_ message: String, identifier: String, warning: Bool) -> some View {
+    private func detachedWarning(_ message: String, identifier: String,
+                                 dismiss: (() -> Void)? = nil) -> some View {
+        PadDocumentWarningView(message: message, identifier: identifier, dismiss: dismiss)
+    }
+
+    private func documentMessage(_ message: String, identifier: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if warning {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .accessibilityHidden(true)
-            }
             Text(message)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier(identifier)
-                .accessibilityLabel(warning ? "Error: \(message)" : message)
+                .accessibilityLabel(message)
         }
         .font(.system(size: 13))
-        .foregroundStyle(warning ? Color.primary : Color.secondary)
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .glassEffect(.regular, in: .rect(cornerRadius: 10))
@@ -678,7 +664,7 @@ struct PadView: View {
 
     private var editorContent: some View {
         editorLayout
-        .glassEffect(.regular, in: .rect)
+        .glassEffect(.regular, in: .rect(cornerRadius: 15))
         .ignoresSafeArea()
         .tint(settings.accentColor)
         .disabled(files.isBusy || files.workspace?.isTransitioning == true)
@@ -806,5 +792,58 @@ private struct EditorFocusMount: NSViewRepresentable {
         }
 
         func requestFocus() { (window as? any PadDocumentWindow)?.requestEditorFocus() }
+    }
+}
+
+struct PadWarningContent {
+    let message: String
+    let guidance: String?
+
+    init(_ error: String) {
+        // These are PadPad's own messages. Keep actionable recovery on its own line.
+        if let recovery = error.range(of: " Choose ") {
+            message = String(error[..<recovery.lowerBound])
+                .replacingOccurrences(of: " Your text is still open.", with: "")
+            guidance = String(error[error.index(after: recovery.lowerBound)...])
+        } else {
+            message = error
+            guidance = nil
+        }
+    }
+}
+
+struct PadDocumentWarningView: View {
+    let message: String
+    let identifier: String
+    var dismiss: (() -> Void)?
+
+    var body: some View {
+        let content = PadWarningContent(message)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(content.message)
+                if let guidance = content.guidance { Text(guidance).foregroundStyle(.secondary) }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier(identifier)
+            if let dismiss {
+                Button("Dismiss Message", systemImage: "xmark", action: dismiss)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+                    .help("Dismiss message")
+                    .accessibilityIdentifier("dismissEditorFeedback")
+            }
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(.primary)
+        .padding(10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
+        .padding(.horizontal, 7)
+        .padding(.bottom, 7)
     }
 }

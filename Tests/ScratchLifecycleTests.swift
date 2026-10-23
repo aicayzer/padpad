@@ -192,6 +192,101 @@ import Testing
         #expect(try fixture.savedFiles().isEmpty)
     }
 
+    @Test func deletedCleanQuickPadStartsFreshAfterSnapshot() async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "Saved text\r\nwith Unicode café"
+        document.save()
+        let file = try #require(document.url)
+        let identity = document.documentID
+        document.close(now: start)
+        try FileManager.default.removeItem(at: file)
+        document.editorSnapshot = { document.savedText }
+        document.showCurrent(now: start.addingTimeInterval(1))
+        await settle(document)
+        #expect(document.url == nil)
+        #expect(document.text.isEmpty)
+        #expect(document.documentID != identity)
+        #expect(document.error == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test(arguments: [false, true])
+    func deletedQuickPadRetainsDirtyOrUncertainSnapshot(_ snapshotFails: Bool) async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "saved"
+        document.save()
+        let file = try #require(document.url)
+        let identity = document.documentID
+        document.close(now: start)
+        try FileManager.default.removeItem(at: file)
+        document.editorSnapshot = {
+            if snapshotFails { throw CocoaError(.fileReadUnknown) }
+            return "last unsaved keystroke"
+        }
+        document.showCurrent(now: start.addingTimeInterval(1))
+        await settle(document)
+        #expect(document.documentID == identity)
+        #expect(document.url == file)
+        #expect(document.text == (snapshotFails ? "saved" : "last unsaved keystroke"))
+        #expect(document.error != nil)
+        #expect(document.folderError == nil)
+        document.save()
+        await settle(document)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test func deletedFileWindowRetainsRecoveryText() throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let file = fixture.root.appending(path: "external.md")
+        try Data("Keep this recovery copy".utf8).write(to: file)
+        let defaults = try #require(UserDefaults(suiteName: "pad-recovery-\(UUID().uuidString)"))
+        let document = PadDocument(defaults: defaults, presentsWindow: false, role: .file)
+        #expect(document.openDocument(file))
+        try FileManager.default.removeItem(at: file)
+        document.refreshIfNeeded()
+        #expect(document.url == file)
+        #expect(document.text == "Keep this recovery copy")
+        #expect(document.error != nil)
+        document.save()
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test func unreadableExistingQuickPadRetainsText() throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "saved"
+        document.save()
+        let file = try #require(document.url)
+        try Data([0xff, 0xfe]).write(to: file)
+        document.refreshIfNeeded()
+        #expect(document.text == "saved")
+        #expect(document.url == file)
+        #expect(document.error != nil)
+        #expect(document.folderError == nil)
+    }
+
+    @Test func emptyShareDoesNotCreateAFileAndUntitledUsesVisibleName() throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        #expect(!document.canShare)
+        #expect(throws: PadError.self) { try document.shareableURL(in: fixture.root) }
+        #expect(try fixture.savedFiles().isEmpty)
+        document.text = "Hello\r\nworld 🌍"
+        #expect(document.canShare)
+        let shared = try document.shareableURL(in: fixture.root)
+        #expect(shared.lastPathComponent == "Untitled.md")
+        #expect(try String(contentsOf: shared, encoding: .utf8) == document.text)
+        document.save()
+        #expect(document.url?.lastPathComponent != "Untitled.md")
+    }
+
     @Test func terminationWaitsForSnapshotAndRefusesSnapshotFailure() async throws {
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }

@@ -1037,6 +1037,29 @@ struct MarkdownBridgeTests {
         #expect(field.stringValue == "Native field")
     }
 
+    @Test func linkPopoverUsesSelectionGeometryAndPreservesSource() async throws {
+        let editor = PadMarkdownEditorController()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor.webView
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        let source = "Select café 🌍\r\n"
+        editor.load(source, documentID: UUID())
+        try await ready(editor)
+        editor.presentLink()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !editor.showingLink, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(editor.showingLink)
+        let rect = try #require(editor.linkRect)
+        #expect(rect.height > 0)
+        #expect(rect.minY >= 0 && rect.maxY <= editor.webView.bounds.height)
+        #expect(try await editor.webView.evaluateJavaScript("window.editor.snapshot(1).text") as? String == source)
+        editor.showingLink = false
+    }
+
     private func ready(_ editor: PadMarkdownEditorController) async throws {
         let deadline = ContinuousClock.now + .seconds(15)
         while !editor.isReady, ContinuousClock.now < deadline {

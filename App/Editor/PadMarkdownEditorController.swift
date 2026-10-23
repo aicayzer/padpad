@@ -101,6 +101,7 @@ final class PadMarkdownEditorController: NSObject {
     var accentOverride: NSColor? { didSet { applyAccent() } }
     var allowsFocus = true
     var showingLink = false
+    private(set) var linkRect: CGRect?
     var hasExternalMarkedText: () -> Bool = { false }
 
     @ObservationIgnored var clipboardWriter: (PadClipboardContents) throws -> Void = { try $0.write(to: .general) }
@@ -491,6 +492,24 @@ final class PadMarkdownEditorController: NSObject {
         focus()
     }
 
+    func presentLink() {
+        guard isReady, formatAvailability["link"] == true else { return }
+        let expectedGeneration = generation
+        webView.evaluateJavaScript("window.editor.linkContext(\(expectedGeneration))") { [weak self] value, error in
+            guard let self, self.generation == expectedGeneration else { return }
+            if let error { self.report(error); return }
+            let context = value as? [String: Any]
+            if let rect = context?["rect"] as? [String: Double],
+               let left = rect["left"], let top = rect["top"],
+               let width = rect["width"], let height = rect["height"] {
+                self.linkRect = CGRect(x: left, y: top, width: max(1, width), height: max(1, height))
+            } else {
+                self.linkRect = nil
+            }
+            self.showingLink = true
+        }
+    }
+
     func format(_ command: PadMarkdownFormatCommand, argument: String? = nil) {
         // InkKit names each heading level; a link takes its destination as an option.
         let name = command == .heading ? "heading\(argument ?? "")" : command.rawValue
@@ -590,7 +609,7 @@ final class PadMarkdownEditorController: NSObject {
                   let scheme = url.scheme?.lowercased(), ["https", "http", "mailto"].contains(scheme) else { return }
             NSWorkspace.shared.open(url)
         case "requestLink":
-            showingLink = true
+            presentLink()
         case "writeClipboard":
             guard let requestID = message["requestId"] as? String else { return }
             var response: [String: String] = [:]

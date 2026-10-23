@@ -86,7 +86,7 @@ struct PadMarkdownToolbar: View {
     }
 
     private var linkButton: some View {
-        Button { editor.showingLink = true } label: {
+        Button { editor.presentLink() } label: {
             PadFormattingGlyph(symbol: "link", selected: active(.link), size: 13.5)
         }
         .buttonStyle(.plain)
@@ -102,7 +102,7 @@ struct PadMarkdownToolbar: View {
             Menu("Headings") { headingCommands }
             Menu("Text style") { styleCommands }
             Divider()
-            Button("Link") { editor.showingLink = true }.disabled(editor.formatAvailability["link"] != true)
+            Button("Link") { editor.presentLink() }.disabled(editor.formatAvailability["link"] != true)
             formatToggle("Inline code", command: .code)
             formatToggle("Code block", command: .codeBlock)
             formatToggle("Quote", command: .quote)
@@ -220,7 +220,7 @@ private struct PadFormattingControlFrame: ViewModifier {
     }
 }
 
-// Keep the link anchor mounted even when the formatting controls are hidden.
+// Anchor the native popover to geometry measured through InkKit’s public facade.
 struct PadMarkdownLinkPresenter: ViewModifier {
     @Bindable var editor: PadMarkdownEditorController
     @State private var linkURL = ""
@@ -230,7 +230,7 @@ struct PadMarkdownLinkPresenter: ViewModifier {
             .onChange(of: editor.showingLink) { _, showing in
                 if showing { linkURL = "" }
             }
-            .popover(isPresented: $editor.showingLink) {
+            .popover(isPresented: $editor.showingLink, attachmentAnchor: editor.linkRect.map { .rect(.rect($0)) } ?? .rect(.bounds), arrowEdge: .top) {
                 VStack(alignment: .leading, spacing: 10) {
                     TextField("Link URL", text: $linkURL)
                         .textFieldStyle(.roundedBorder)

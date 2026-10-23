@@ -391,8 +391,9 @@ import Testing
         #expect(!files.isDirty)
         try FileManager.default.removeItem(at: opened)
         files.toggle()
-        #expect(files.text == "changed disk file")
-        #expect(files.error != nil)
+        #expect(files.text.isEmpty)
+        #expect(files.url == nil)
+        #expect(files.error == nil)
     }
 
     @Test func hidingSavedScratchRetainsEditsAndReplacementRequiresConfirmation() throws {

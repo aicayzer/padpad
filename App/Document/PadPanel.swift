@@ -531,7 +531,6 @@ struct PadView: View {
                                         .accessibilityAddTraits(showingFormatting ? .isSelected : [])
                                         .help(showingFormatting ? "Hide formatting" : "Show formatting")
                                         .disabled(!editor.isReady)
-                                        .modifier(PadMarkdownLinkPresenter(editor: editor))
                                     } else {
                                         Menu {
                                             PadMarkdownToolbar(editor: editor).menuCommands
@@ -546,7 +545,6 @@ struct PadView: View {
                                         .accessibilityIdentifier("formattingMenu")
                                         .help("Formatting")
                                         .disabled(!editor.isReady)
-                                        .modifier(PadMarkdownLinkPresenter(editor: editor))
                                     }
                                 }
                             }
@@ -554,6 +552,7 @@ struct PadView: View {
                                 files.share(from: shareAnchor.view)
                             }
                             .background(PadShareAnchorView(anchor: shareAnchor).allowsHitTesting(false))
+                            .disabled(!files.canShare)
                         }
                         .fixedSize()
                         Button("Save") { files.save() }
@@ -588,6 +587,7 @@ struct PadView: View {
                         VStack(spacing: 0) {
                             if editor.showingFind { PadMarkdownFindBar(editor: editor) }
                             PadMarkdownEditorView(editor: editor)
+                                .modifier(PadMarkdownLinkPresenter(editor: editor))
                         }
                             .onChange(of: settings.readingWidth, initial: true) {
                                 editor.setReadingWidth(readingColumnWidth)

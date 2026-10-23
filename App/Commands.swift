@@ -35,7 +35,7 @@ struct AppCommands: Commands {
             Button("Rename…") { document.requestRename() }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(!canEdit)
-            Button("Share…") { document.share() }.disabled(!canEdit)
+            Button("Share…") { document.share() }.disabled(!canEdit || !document.canShare)
             if document.url != nil {
                 Button("Reveal in Finder") { document.revealInFinder() }.disabled(!canEdit)
             }

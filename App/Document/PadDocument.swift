@@ -37,9 +37,11 @@ enum PadError: LocalizedError {
     case nameTooLong
     case nameExists
     case renamePermission
+    case emptyShare
 
     var errorDescription: String? {
         switch self {
+        case .emptyShare: "Write something before sharing."
         case .unsupported: "Choose a Markdown (.md) or text (.txt) file."
         case .encoding: "PadPad can’t read this file’s text encoding."
         case .changed: "This file changed elsewhere. Choose “Save As” to keep your changes."
@@ -103,6 +105,7 @@ final class PadDocument {
     var showSettings: @MainActor () -> Void = {}
     private(set) var renameRequest = 0
     var error: String?
+    private(set) var folderError: String?
     private(set) var editorFeedback: PadMarkdownEditorFeedback?
     private(set) var notice: String? {
         didSet {
@@ -215,6 +218,7 @@ final class PadDocument {
     var currentFormat: PadFormat { url.flatMap { PadFormat(rawValue: $0.pathExtension.lowercased()) } ?? scratchFormat }
 
     var isDirty: Bool { text != savedText }
+    var canShare: Bool { !text.isEmpty && !isBusy }
     var isBusy: Bool { operation != nil }
     var isVisible: Bool { panel?.isVisible == true }
     var isDefaultFolder: Bool { folder.standardizedFileURL == Self.downloadsFolder.standardizedFileURL }
@@ -479,8 +483,8 @@ final class PadDocument {
         guard await present(picker, parent: parent ?? dialogParent) == .OK, let chosen = picker.url else { return }
         do {
             try rememberSaveFolder(chosen)
-            error = nil
-        } catch { self.error = readableError(error, fallback: "Couldn’t use this folder. Choose another folder.") }
+            folderError = nil
+        } catch { folderError = readableError(error, fallback: "Couldn’t use this folder. Choose another folder.") }
     }
 
     private func saveFolderPicker(directory: URL) -> NSOpenPanel {
@@ -560,8 +564,11 @@ final class PadDocument {
         guard !isBusy else { return }
         if isVisible {
             close(now: now)
-        } else if url != nil || isReusable(at: now) {
-            refreshCurrentFile()
+        } else if url != nil {
+            // Show before capturing: an offscreen WebKit view may not answer a snapshot.
+            show()
+            refreshIfNeeded()
+        } else if isReusable(at: now) {
             show()
         } else {
             // Expired temporary drafts deliberately clear without a save prompt.
@@ -723,7 +730,15 @@ final class PadDocument {
             }
             error = nil
         } catch {
-            self.error = readableError(error, fallback: "Couldn’t read this file. Your text is still open.")
+            let failure = error as NSError
+            // Only a confirmed missing file permits discarding a clean quick pad.
+            // Permission, decoding and snapshot failures retain recoverable text.
+            if isQuickPad, !isDirty, failure.domain == NSCocoaErrorDomain,
+               failure.code == NSFileReadNoSuchFileError {
+                resetDocument()
+                return
+            }
+            self.error = readableError(error, fallback: "Couldn’t read this file. Your text is still open. Choose Save As to keep a copy.")
             notice = nil
         }
     }
@@ -873,7 +888,7 @@ final class PadDocument {
 
     func share(from anchor: NSView? = nil) {
         if synchronizeEditorThen({ self.share(from: anchor) }) { return }
-        guard !isBusy, let view = anchor ?? panel?.contentView else { return }
+        guard canShare, let view = anchor ?? panel?.contentView else { return }
         operation = .sharing
         do {
             let picker = NSSharingServicePicker(items: [try shareableURL()])
@@ -898,13 +913,14 @@ final class PadDocument {
     }
 
     func shareableURL(in temporaryFolder: URL = FileManager.default.temporaryDirectory) throws -> URL {
+        guard !text.isEmpty else { throw PadError.emptyShare }
         if let url, !isDirty, let current = try? Data(contentsOf: url), current == baseline { return url }
         let directory = temporaryFolder.appending(path: "PadShare-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let name: String
         if let url { name = url.lastPathComponent }
         else if let pendingName { name = "\(pendingName).\(currentFormat.rawValue)" }
-        else { name = try PadFilename.name(parts: nameParts, format: currentFormat, number: nextNumber) }
+        else { name = "Untitled.\(currentFormat.rawValue)" }
         let snapshot = directory.appending(path: name)
         try Data(text.utf8).write(to: snapshot, options: .atomic)
         return snapshot
@@ -1117,7 +1133,7 @@ final class PadDocument {
         if let error = error as? PadMarkdownEditorError { return error.localizedDescription }
         if let error = error as? CocoaError {
             switch error.code {
-            case .fileReadNoSuchFile: return "This file is no longer available. Choose another file."
+            case .fileReadNoSuchFile: return "This file is no longer available. Your text is still open. Choose “Save As” to keep a copy."
             case .fileReadNoPermission:
                 return "PadPad can’t access this file. Choose it again with “Open File”."
             case .fileWriteNoPermission:

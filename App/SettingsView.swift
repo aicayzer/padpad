@@ -248,7 +248,7 @@ struct SettingsView: View {
                 Text(document.needsFolderSelection
                      ? "Choose a folder on your first save, or choose one here. Opened files stay in their own folder."
                      : "New quick-pad files save here. Opened files stay in their own folder.")
-                if let error = document.error { Text(error).foregroundStyle(Color("ErrorColor")) }
+                if let error = document.folderError { Text(error).foregroundStyle(Color("ErrorColor")) }
             }
         }.formStyle(.grouped)
     }

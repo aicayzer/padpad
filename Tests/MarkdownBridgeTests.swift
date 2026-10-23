@@ -2,6 +2,7 @@ import AppKit
 import Testing
 import WebKit
 import PDFKit
+import SwiftUI
 @testable import Pad
 
 @MainActor
@@ -1035,6 +1036,133 @@ struct MarkdownBridgeTests {
         }
         #expect(try await editor.webView.evaluateJavaScript("window.editor.snapshot(1).text") as? String == "First\n\nSecond")
         #expect(field.stringValue == "Native field")
+    }
+
+    @Test(arguments: [false, true])
+    func linkPopoverUsesSelectionGeometryAndPreservesSource(nearBottom: Bool) async throws {
+        let suite = "pad-link-geometry-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let activation = NSWorkspace.OpenConfiguration()
+        activation.activates = true
+        activation.addsToRecentItems = false
+        _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
+        let document = PadDocument(defaults: defaults)
+        document.newFile()
+        let window = try #require(document.nativeWindow)
+        window.setContentSize(NSSize(width: 520, height: 320))
+        defer {
+            document.editorSnapshot = nil
+            window.orderOut(nil); window.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let source = (nearBottom ? "One\n\nTwo\n\nThree\n\nFour\n\n" : "") + "Select café 🌍\r\n"
+        document.text = source
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        editor.load(source, documentID: document.documentID)
+        try await ready(editor)
+        editor.presentLink()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !editor.showingLink, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(editor.showingLink)
+        let rect = try #require(editor.linkRect)
+        #expect(rect.height > 0)
+        #expect(rect.minY >= 0 && rect.maxY <= editor.webView.bounds.height)
+        #expect(try await editor.webView.evaluateJavaScript("window.editor.snapshot().text") as? String == source)
+        if ProcessInfo.processInfo.environment["PAD_QA_OUTPUT"] != nil {
+            try await Task.sleep(for: .milliseconds(400))
+            for (index, capturedWindow) in NSApp.windows.filter({ $0.isVisible }).enumerated() {
+                guard let content = capturedWindow.contentView,
+                      let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { continue }
+                content.cacheDisplay(in: content.bounds, to: bitmap)
+                let data = try #require(bitmap.representation(using: .png, properties: [:]))
+                Attachment.record(data, named: "link-\(nearBottom ? "bottom" : "top")-window-\(index).png")
+                if capturedWindow !== window, let screen = capturedWindow.screen {
+                    #expect(screen.visibleFrame.contains(capturedWindow.frame))
+                }
+            }
+        }
+        editor.showingLink = false
+    }
+
+    @Test(arguments: [false, true])
+    func detachedWarningsKeepNativeWindowBoundsAndRecoveryText(fileWindow: Bool) async throws {
+        let suite = "pad-detached-warning-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(suite).md")
+        try "A few things to keep\n\nA thought for later.\n".write(to: file, atomically: true, encoding: .utf8)
+        let activation = NSWorkspace.OpenConfiguration()
+        activation.activates = true
+        activation.addsToRecentItems = false
+        _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
+        let document = PadDocument(defaults: defaults, role: fileWindow ? .file : .quickPad)
+        #expect(document.openDocument(file))
+        let window = try #require(document.nativeWindow)
+        window.setContentSize(NSSize(width: 520, height: 320))
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        try await ready(editor)
+        defer {
+            document.editorSnapshot = nil
+            window.orderOut(nil); window.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: file)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let frame = window.frame
+        let editorHeight = editor.webView.bounds.height
+        let retained = "A few things to keep\n\nA thought for later. Unsaved café 🌍\n"
+        document.editorSnapshot = { retained }
+        try FileManager.default.removeItem(at: file)
+        document.refreshIfNeeded()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while document.error == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(document.error != nil)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(window.frame == frame)
+        #expect(editor.webView.bounds.height < editorHeight - 20)
+        #expect(editor.webView.bounds.height > 100)
+        #expect(document.text == retained)
+        #expect(document.folderError == nil)
+        #expect(!window.isOpaque && window.backgroundColor == .clear)
+        #expect(PadWarningContent(try #require(document.error)).guidance == "Choose “Save As” to keep a copy.")
+        if ProcessInfo.processInfo.environment["PAD_QA_OUTPUT"] != nil, let content = window.contentView {
+            let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            Attachment.record(try #require(bitmap.representation(using: .png, properties: [:])),
+                              named: "detached-warning-\(fileWindow ? "file" : "quick-pad").png")
+            let warning = PadDocumentWarningView(message: try #require(document.error), identifier: "documentError")
+                .frame(width: 520)
+                .environment(\.colorScheme, .light)
+                .background(Color(nsColor: .windowBackgroundColor))
+            let renderer = ImageRenderer(content: warning)
+            renderer.scale = 2
+            let image = try #require(renderer.nsImage)
+            let tiff = try #require(image.tiffRepresentation)
+            let rendered = try #require(NSBitmapImageRep(data: tiff))
+            Attachment.record(try #require(rendered.representation(using: .png, properties: [:])),
+                              named: "detached-warning-content-\(fileWindow ? "file" : "quick-pad").png")
+        }
+        window.orderOut(nil)
+        #expect(!window.isVisible)
+        document.show()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(window.isVisible)
+        #expect(window.frame == frame)
+        #expect(document.error != nil)
+        #expect(document.text == retained)
+        document.error = nil
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(editor.webView.bounds.height >= editorHeight - 1)
+        #expect(window.frame == frame)
     }
 
     private func ready(_ editor: PadMarkdownEditorController) async throws {

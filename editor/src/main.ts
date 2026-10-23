@@ -223,6 +223,11 @@ const facade = {
     guardedCommand(() =>
       editor.format(command, options ?? undefined, expected),
     ),
+  linkContext: (expected: number) => {
+    const snapshot = editor.textSnapshot(expected);
+    const rect = editor.textRangesRects([snapshot.selection])[0]?.[0];
+    return { rect: rect ?? null };
+  },
   focus: editor.focus.bind(editor),
   find: (search: string, expected: number) =>
     guardedCommand(() => editor.find(search, expected)),

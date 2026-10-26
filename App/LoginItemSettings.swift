@@ -21,7 +21,7 @@ final class LoginItemSettings {
             if enabled { try SMAppService.mainApp.register() }
             else { try await SMAppService.mainApp.unregister() }
         } catch {
-            self.error = "Couldn’t change “Open at login”. Try again."
+            self.error = "Couldn’t change the “Open at login” setting. Try again."
         }
     }
 

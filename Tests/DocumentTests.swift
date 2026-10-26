@@ -839,7 +839,7 @@ import Testing
         files.nameParts = [.literal("../invalid")]
         files.text = "keep this"
         await files.saveAs()
-        #expect(files.error == PadError.invalidName.message())
+        #expect(files.error == PadError.invalidName.message(during: .nameFormat))
         #expect(files.url == nil)
         #expect(files.isDirty)
         #expect(!files.isBusy)
@@ -854,7 +854,7 @@ import Testing
         #expect(files.namePreview == "Invalid filename")
         files.save()
         #expect(files.url == nil)
-        #expect(files.error == PadError.invalidName.message())
+        #expect(files.error == PadError.invalidName.message(during: .nameFormat))
         #expect(defaults.integer(forKey: "pad.nextNumber") == 0)
         files.nameParts = PadFilename.defaultParts
         try FileManager.default.removeItem(at: root)

@@ -458,7 +458,7 @@ struct MarkdownBridgeTests {
         let refusal = try #require(received.first)
         #expect(refusal.code == "composition")
         #expect(refusal.source == .edit)
-        #expect(refusal.message.text == "Finish typing, then try that action again.")
+        #expect(refusal.message.text == "Finish typing, then try again.")
         try await Task.sleep(for: .milliseconds(100))
         #expect(received.count == 1)
         #expect(editor.isReady)
@@ -674,7 +674,7 @@ struct MarkdownBridgeTests {
         editor.onFeedback(warning, document.documentID)
         #expect(document.editorFeedback == warning)
         #expect(document.error == nil)
-        #expect(warning.message.text == "Couldn’t apply that edit. Your text is unchanged.")
+        #expect(warning.message.text == "That edit isn’t possible here. Nothing changed.")
 
         // A failed save snapshot remains actionable even after editing recovers.
         let snapshot = document.editorSnapshot

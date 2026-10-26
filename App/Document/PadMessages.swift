@@ -91,10 +91,14 @@ enum PadProblem: Equatable {
 
     private static func classify(_ error: PadError, during context: Context) -> PadProblem {
         let keepsText = context != .open
+        if context == .nameFormat, [.emptyName, .nameTooLong, .invalidName].contains(error) {
+            return .message(PadMessage(text: "The file name format isn’t valid.", hint: "Change it in Settings."))
+        }
         switch error {
         case .emptyName: return .message(PadMessage(text: "Enter a file name."))
-        case .nameTooLong: return .message(PadMessage(text: "This file name is too long. Try a shorter one."))
-        case .invalidName: return .message(PadMessage(text: "This file name isn’t valid. Try another name."))
+        case .nameTooLong: return .message(PadMessage(text: "This file name is too long.", hint: "Choose a shorter name."))
+        case .invalidName:
+            return .message(PadMessage(text: "This file name isn’t valid.", hint: "Names can’t include “/”, “\\”, or “:”."))
         case .nameExists: return .message(nameExists)
         case .emptyShare: return .message(PadMessage(text: "Write something before sharing."))
         case .unsupported where context == .open:
@@ -157,7 +161,7 @@ enum PadProblem: Equatable {
         case .print:
             .alert(PadAlert(title: "Couldn’t print", message: "Try printing again."))
         case .rename:
-            .message(PadMessage(text: "Couldn’t rename this file.", hint: "Try another name or choose “Save As”."))
+            .message(PadMessage(text: "Couldn’t rename this file.", hint: "Try another name."))
         case .copy: .message(copyFailed)
         case .snapshot: .message(snapshotFailed)
         case .editor: .message(editorFailed)
@@ -166,62 +170,48 @@ enum PadProblem: Equatable {
 
     private static let keepCopy = "To keep your text, save it as a new file."
     private static let nameExists = PadMessage(text: "A file with this name already exists.", hint: "Choose another name.")
-    private static let snapshotFailed = PadMessage(text: "Couldn’t read your text. Try again.")
-    private static let editorFailed = PadMessage(text: "The editor couldn’t complete that action. Your text is still open.")
-    private static let copyFailed = PadMessage(text: "Couldn’t copy your text. Try again.")
+    private static let snapshotFailed = PadMessage(text: "Couldn’t get your latest text.", hint: "Try again.")
+    private static let editorFailed = PadMarkdownEditorError.editorFailed
+    private static let copyFailed = PadMessage(text: "Couldn’t copy your text.", hint: "Try again.")
 }
 
 extension PadMarkdownEditorError {
     var message: PadMessage {
         switch self {
-        case .composing: PadMessage(text: "Finish typing before saving or closing.")
-        case .notReady: PadMessage(text: "The editor is still loading. Try again in a moment.")
-        case .documentChanged: PadMessage(text: "Your text changed. Try again.")
-        case .invalidResponse: PadMessage(text: "Couldn’t read your text. Try again.")
-        case .unavailable: PadMessage(text: "The editor is unavailable. Your text is still open.")
-        case .script: PadMessage(text: "The editor couldn’t complete that action. Your text is still open.")
-        case .snapshotRejected(let code, _):
-            switch code {
-            case "composition": PadMessage(text: "Finish typing before saving or closing.")
-            case "not-ready": PadMessage(text: "The editor is still loading. Try again in a moment.")
-            case "stale-document": PadMessage(text: "Your text changed. Try again.")
-            case "operation-pending": PadMessage(text: "The editor is finishing a paste. Try again in a moment.")
-            default: PadMessage(text: "Couldn’t preserve your text. Try again.")
-            }
+        case .composing, .snapshotRejected("composition", _): Self.finishTyping
+        case .notReady, .snapshotRejected("not-ready", _): Self.loading
+        case .documentChanged, .snapshotRejected("stale-document", _): Self.textChanged
+        case .snapshotRejected("operation-pending", _): Self.pasting
+        case .invalidResponse, .snapshotRejected: PadMessage(text: "Couldn’t get your latest text.", hint: "Try again.")
+        case .unavailable: PadMessage(text: "The editor isn’t responding.", hint: "Try again.")
+        case .script: Self.editorFailed
         }
     }
+
+    static let finishTyping = PadMessage(text: "Finish typing, then try again.")
+    static let loading = PadMessage(text: "The editor is still loading.", hint: "Try again in a moment.")
+    static let pasting = PadMessage(text: "The editor is finishing a paste.", hint: "Try again in a moment.")
+    static let textChanged = PadMessage(text: "Your text changed.", hint: "Try again.")
+    static let editorFailed = PadMessage(text: "The editor couldn’t finish that action.", hint: "Try again.")
 }
 
 extension PadMarkdownEditorFeedback {
     /// Editor feedback is always a small problem shown in the panel.
     var message: PadMessage {
         switch (source, code) {
-        case (.clipboard, "diagram-unavailable"):
-            PadMessage(text: "Some diagrams couldn’t be exported. Their Markdown source is retained.")
-        case (.clipboard, "image-unavailable"):
-            PadMessage(text: "Some images couldn’t be exported. Their Markdown references are retained.")
-        case (.clipboard, _):
-            PadMessage(text: "Couldn’t copy that content. Try again.")
-        case (.print, _):
-            PadMessage(text: "Some content couldn’t be included in the printout.")
-        case (.edit, "preservation"):
-            PadMessage(text: "Couldn’t apply that edit. Your text is unchanged.")
-        case (.edit, "composition"):
-            PadMessage(text: "Finish typing, then try that action again.")
-        case (.edit, "not-ready"):
-            PadMessage(text: "The editor is still loading. Try again in a moment.")
-        case (.edit, "operation-pending"):
-            PadMessage(text: "The editor is finishing a paste. Try again in a moment.")
-        case (.edit, "read-only"):
-            PadMessage(text: "This content is read-only.")
-        case (.edit, "stale-document"):
-            PadMessage(text: "The document changed. Try that action again.")
-        case (.edit, "image-unavailable"):
-            PadMessage(text: "Couldn’t add that image.")
-        case (.edit, "file-unavailable"):
-            PadMessage(text: "Couldn’t add that file.")
-        default:
-            PadMessage(text: "The editor couldn’t complete that action.")
+        case (.clipboard, "diagram-unavailable"): PadMessage(text: "Copied. Some diagrams are included as Markdown.")
+        case (.clipboard, "image-unavailable"): PadMessage(text: "Copied. Some images are included as Markdown.")
+        case (.clipboard, _): PadMessage(text: "Couldn’t copy your text.", hint: "Try again.")
+        case (.print, _): PadMessage(text: "Some content won’t appear in the printout.")
+        case (.edit, "preservation"): PadMessage(text: "That edit isn’t possible here. Nothing changed.")
+        case (.edit, "composition"): PadMarkdownEditorError.finishTyping
+        case (.edit, "not-ready"): PadMarkdownEditorError.loading
+        case (.edit, "operation-pending"): PadMarkdownEditorError.pasting
+        case (.edit, "read-only"): PadMessage(text: "This content can’t be edited.")
+        case (.edit, "stale-document"): PadMarkdownEditorError.textChanged
+        case (.edit, "image-unavailable"): PadMessage(text: "Couldn’t add that image.")
+        case (.edit, "file-unavailable"): PadMessage(text: "Couldn’t add that file.")
+        default: PadMarkdownEditorError.editorFailed
         }
     }
 }

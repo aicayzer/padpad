@@ -58,6 +58,48 @@ import Testing
         }
     }
 
+    @Test func copyIsPlainAndKeepsTheAgreedWording() {
+        #expect(PadMarkdownEditorFeedback(code: "preservation", source: .edit).message
+            == PadMessage(text: "That edit isn’t possible here. Nothing changed."))
+        #expect(PadMarkdownEditorFeedback(code: "image-unavailable", source: .clipboard).message
+            == PadMessage(text: "Copied. Some images are included as Markdown."))
+        #expect(PadError.missingFolder.alert() == PadAlert(title: "The save folder isn’t available",
+                                                           message: "Choose another folder in Settings.",
+                                                           action: .openSettings))
+        #expect(PadError.missingFolder.alert()?.buttons == ["Open Settings", "Cancel"])
+        #expect(PadError.invalidName.message(during: .nameFormat)
+            == PadMessage(text: "The file name format isn’t valid.", hint: "Change it in Settings."))
+
+        let errors: [any Error] = [PadError.unsupported, PadError.encoding, PadError.changed, PadError.missingFolder,
+                                   PadError.invalidName, PadError.emptyName, PadError.nameTooLong, PadError.nameExists,
+                                   PadError.renamePermission, PadError.emptyShare, PadMarkdownEditorError.notReady,
+                                   PadMarkdownEditorError.composing, PadMarkdownEditorError.unavailable,
+                                   CocoaError(.fileReadNoSuchFile), CocoaError(.fileReadNoPermission),
+                                   CocoaError(.fileWriteNoPermission), CocoaError(.fileWriteOutOfSpace), POSIXError(.EIO)]
+        let contexts: [PadProblem.Context] = [.open, .read, .save, .saveAs, .rename, .share, .print, .copy, .editor,
+                                              .snapshot, .nameFormat]
+        var words: [String] = []
+        for error in errors {
+            for context in contexts {
+                switch PadProblem(error, during: context) {
+                case .message(let message): words += [message.text, message.hint].compactMap(\.self)
+                case .alert(let alert): words += [alert.title, alert.message] + alert.buttons
+                }
+            }
+        }
+        for source in [PadMarkdownEditorFeedback.Source.edit, .clipboard, .print] {
+            for code in ["preservation", "composition", "not-ready", "operation-pending", "read-only", "stale-document",
+                         "image-unavailable", "file-unavailable", "diagram-unavailable", "unknown"] {
+                let message = PadMarkdownEditorFeedback(code: code, source: source).message
+                words += [message.text, message.hint].compactMap(\.self)
+            }
+        }
+        for text in words {
+            #expect(!text.contains("'") && !text.contains("!") && !text.lowercased().contains("please"), "\(text)")
+            #expect(!text.contains("Your text is still open"), "\(text)")
+        }
+    }
+
     @Test func alertIsPresentedOnceAndBlocksTheDocumentUntilItCloses() throws {
         let fixture = try MessageFixture()
         defer { fixture.cleanUp() }

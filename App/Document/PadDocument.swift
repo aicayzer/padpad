@@ -492,7 +492,7 @@ final class PadDocument {
         do {
             try rememberSaveFolder(chosen)
             folderError = nil
-        } catch { folderError = "Couldn’t use this folder. Choose another folder." }
+        } catch { folderError = "PadPad can’t use this folder. Choose another one." }
     }
 
     private func saveFolderPicker(directory: URL) -> NSOpenPanel {
@@ -1144,11 +1144,11 @@ final class PadDocument {
         case .message(let message):
             self.error = message
         case .alert(let alert):
-            self.error = nil
             if context == .read {
                 guard alert != reportedReadAlert else { return }
                 reportedReadAlert = alert
             }
+            self.error = nil
             present(alert)
         }
     }

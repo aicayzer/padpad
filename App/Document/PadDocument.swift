@@ -104,9 +104,13 @@ final class PadDocument {
     var settingsPresented = false
     var showSettings: @MainActor () -> Void = {}
     private(set) var renameRequest = 0
-    var error: String?
+    var error: String? {
+        didSet { if let error, error != oldValue { announceProblem(error) } }
+    }
     private(set) var folderError: String?
-    private(set) var editorFeedback: PadMarkdownEditorFeedback?
+    private(set) var editorFeedback: PadMarkdownEditorFeedback? {
+        didSet { if let editorFeedback, editorFeedback != oldValue { announceProblem(editorFeedback.message) } }
+    }
     private(set) var notice: String? {
         didSet {
             noticeTask?.cancel()
@@ -311,11 +315,19 @@ final class PadDocument {
         return true
     }
 
-    func dismissEditorFeedback() {
-        editorFeedback = nil
+    /// Clicking the message pill clears the problem it shows: a document error first, then editor feedback.
+    func dismissMessage() {
+        if error != nil { error = nil } else { editorFeedback = nil }
         guard nativeWindow?.isKeyWindow == true, let editor = markdownEditor,
               !editor.showingFind, !editor.showingLink else { return }
         editor.focus()
+    }
+
+    // A pill is not focused when it appears, so VoiceOver would otherwise miss it.
+    private func announceProblem(_ message: String) {
+        NSAccessibility.post(element: (nativeWindow as NSObject?) ?? NSApp, notification: .announcementRequested,
+                             userInfo: [.announcement: "Error: \(message)",
+                                        .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     private func reloadEditor() {

@@ -701,7 +701,7 @@ struct MarkdownBridgeTests {
         _ = try await editor.snapshot()
         #expect(document.editorFeedback == exportWarning)
         let retained = document.text
-        document.dismissEditorFeedback()
+        document.dismissMessage()
         #expect(document.editorFeedback == nil)
         #expect(document.text == retained)
         #expect(document.error == saveError)
@@ -757,7 +757,7 @@ struct MarkdownBridgeTests {
         Attachment.record(screenshot, named: screenshotName)
         window.makeFirstResponder(window)
         #expect(!editor.ownsFirstResponder)
-        document.dismissEditorFeedback()
+        document.dismissMessage()
         #expect(document.editorFeedback == nil)
         let focusDeadline = ContinuousClock.now + .seconds(5)
         while !editor.ownsFirstResponder, ContinuousClock.now < focusDeadline {
@@ -1090,7 +1090,7 @@ struct MarkdownBridgeTests {
     }
 
     @Test(arguments: [false, true])
-    func detachedWarningsKeepNativeWindowBoundsAndRecoveryText(fileWindow: Bool) async throws {
+    func problemsKeepNativeWindowBoundsAndRecoveryText(fileWindow: Bool) async throws {
         let suite = "pad-detached-warning-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set(true, forKey: "pad.onboardingCompleted")
@@ -1128,8 +1128,8 @@ struct MarkdownBridgeTests {
         try #require(document.error != nil)
         try await Task.sleep(for: .milliseconds(150))
         #expect(window.frame == frame)
-        #expect(editor.webView.bounds.height < editorHeight - 20)
-        #expect(editor.webView.bounds.height > 100)
+        // The message sits inside the editor card, so the editor keeps its size.
+        #expect(abs(editor.webView.bounds.height - editorHeight) <= 1)
         #expect(document.text == retained)
         #expect(document.folderError == nil)
         #expect(!window.isOpaque && window.backgroundColor == .clear)
@@ -1139,7 +1139,7 @@ struct MarkdownBridgeTests {
             content.cacheDisplay(in: content.bounds, to: bitmap)
             Attachment.record(try #require(bitmap.representation(using: .png, properties: [:])),
                               named: "detached-warning-\(fileWindow ? "file" : "quick-pad").png")
-            let warning = PadDocumentWarningView(message: try #require(document.error), identifier: "documentError")
+            let warning = PadMessageView(message: try #require(document.error), identifier: "documentError", dismiss: {})
                 .frame(width: 520)
                 .environment(\.colorScheme, .light)
                 .background(Color(nsColor: .windowBackgroundColor))

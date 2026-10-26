@@ -6,29 +6,10 @@ enum PadMarkdownFormatCommand: String {
     case paragraph, heading, bold, italic, code, codeBlock, quote, bulletList, orderedList, link
 }
 
-enum PadMarkdownEditorError: LocalizedError {
+enum PadMarkdownEditorError: Error {
     case notReady, documentChanged, invalidResponse, unavailable, composing
     case script(String)
     case snapshotRejected(code: String, message: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .composing: "Finish typing before saving or closing."
-        case .notReady: "The editor is still loading. Try again in a moment."
-        case .documentChanged: "Your text changed. Try again."
-        case .invalidResponse: "Couldn’t read your text. Try again."
-        case .unavailable: "The editor is unavailable. Your text is still open."
-        case .script: "The editor couldn’t complete that action. Your text is still open."
-        case .snapshotRejected(let code, _):
-            switch code {
-            case "composition": "Finish typing before saving or closing."
-            case "not-ready": "The editor is still loading. Try again in a moment."
-            case "stale-document": "Your text changed. Try again."
-            case "operation-pending": "The editor is finishing a paste. Try again in a moment."
-            default: "Couldn’t preserve your text. Your text is still open. Try again."
-            }
-        }
-    }
 }
 
 struct PadMarkdownEditorFeedback: Equatable {
@@ -36,37 +17,6 @@ struct PadMarkdownEditorFeedback: Equatable {
 
     let code: String
     let source: Source
-
-    var message: String {
-        switch (source, code) {
-        case (.clipboard, "diagram-unavailable"):
-            "Some diagrams couldn’t be exported. Their Markdown source is retained."
-        case (.clipboard, "image-unavailable"):
-            "Some images couldn’t be exported. Their Markdown references are retained."
-        case (.clipboard, _):
-            "Couldn’t copy that content. Try again."
-        case (.print, _):
-            "Some content couldn’t be included in the printout."
-        case (.edit, "preservation"):
-            "Couldn’t apply that edit. Your text is unchanged."
-        case (.edit, "composition"):
-            "Finish typing, then try that action again."
-        case (.edit, "not-ready"):
-            "The editor is still loading. Try again in a moment."
-        case (.edit, "operation-pending"):
-            "The editor is finishing a paste. Try again in a moment."
-        case (.edit, "read-only"):
-            "This content is read-only."
-        case (.edit, "stale-document"):
-            "The document changed. Try that action again."
-        case (.edit, "image-unavailable"):
-            "Couldn’t add that image."
-        case (.edit, "file-unavailable"):
-            "Couldn’t add that file."
-        default:
-            "The editor couldn’t complete that action."
-        }
-    }
 }
 
 @MainActor

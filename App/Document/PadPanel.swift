@@ -640,7 +640,7 @@ struct PadView: View {
         } else if let feedback = files.editorFeedback {
             PadMessageView(message: feedback.message, identifier: "editorFeedback", dismiss: { files.dismissMessage() })
         } else if let notice = files.notice {
-            PadMessageView(message: notice, identifier: "documentNotice")
+            PadMessageView(message: PadMessage(text: notice), identifier: "documentNotice")
         }
     }
 
@@ -777,23 +777,6 @@ private struct EditorFocusMount: NSViewRepresentable {
     }
 }
 
-struct PadWarningContent {
-    let message: String
-    let guidance: String?
-
-    init(_ error: String) {
-        // These are PadPad's own messages. Keep actionable recovery on its own line.
-        if let recovery = error.range(of: " Choose ") {
-            message = String(error[..<recovery.lowerBound])
-                .replacingOccurrences(of: " Your text is still open.", with: "")
-            guidance = String(error[error.index(after: recovery.lowerBound)...])
-        } else {
-            message = error
-            guidance = nil
-        }
-    }
-}
-
 /// Sizes its child to the text it holds, never wider than `maximum`.
 private struct PadMessageWidth: Layout {
     let maximum: CGFloat
@@ -809,7 +792,7 @@ private struct PadMessageWidth: Layout {
 
 /// One message pill for the whole app. A confirmation clears itself; a problem stays until it is clicked or its cause goes away.
 struct PadMessageView: View {
-    let message: String
+    let message: PadMessage
     let identifier: String
     /// Present for problems only: clicking anywhere on the pill dismisses it.
     var dismiss: (() -> Void)?
@@ -820,22 +803,21 @@ struct PadMessageView: View {
     var body: some View {
         PadMessageWidth(maximum: Self.maximumWidth) {
             if let dismiss {
-                let content = PadWarningContent(message)
                 Button(action: dismiss) {
                     pill {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(content.message).fontWeight(.medium).foregroundStyle(.primary)
-                            if let guidance = content.guidance { Text(guidance).foregroundStyle(.secondary) }
+                            Text(message.text).fontWeight(.medium).foregroundStyle(.primary)
+                            if let hint = message.hint { Text(hint).foregroundStyle(.secondary) }
                         }
                     }
                 }
                 .buttonStyle(.plain)
                 .help("Dismiss")
-                .accessibilityLabel("Error: \([content.message, content.guidance].compactMap(\.self).joined(separator: " "))")
+                .accessibilityLabel("Error: \([message.text, message.hint].compactMap(\.self).joined(separator: " "))")
                 .accessibilityHint("Dismiss")
                 .accessibilityIdentifier(identifier)
             } else {
-                pill { Text(message).foregroundStyle(.secondary) }
+                pill { Text(message.text).foregroundStyle(.secondary) }
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier(identifier)
             }

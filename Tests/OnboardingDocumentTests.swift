@@ -61,7 +61,7 @@ import Testing
         #expect(!document.onboarding.isPresented)
         #expect(document.text == "Keep my scratch")
         #expect(document.documentID == id)
-        #expect(document.error == "Couldn’t read your text. Try again.")
+        #expect(document.error == expectedMessage(CocoaError(.fileReadUnknown), during: .snapshot))
         #expect(try fixture.savedFiles().isEmpty)
     }
 
@@ -178,7 +178,7 @@ import Testing
         #expect(document.text == "An existing file")
     }
 
-    @Test func failedFileOpenLeavesOnboardingToShowTheRetainedDocumentError() async throws {
+    @Test func failedFileOpenLeavesOnboardingAndAlertsOverTheRetainedDocument() async throws {
         let fixture = try OnboardingDocumentFixture()
         defer { fixture.cleanUp() }
         let document = fixture.document
@@ -187,7 +187,7 @@ import Testing
         await document.restartOnboarding()
         document.open(fixture.root.appending(path: "missing.txt"))
         #expect(!document.onboarding.isPresented)
-        #expect(document.error != nil)
+        #expect(fixture.alerts.last == expectedAlert(CocoaError(.fileReadNoSuchFile), during: .open))
         #expect(document.text == "Keep this draft")
         #expect(document.documentID == id)
         #expect(document.url == nil)
@@ -199,6 +199,7 @@ private struct OnboardingDocumentFixture {
     let root: URL
     let defaults: UserDefaults
     let document: PadDocument
+    let alerts = AlertRecorder()
     private let suite: String
 
     init(defaultFormat: PadFormat = .md) throws {
@@ -208,7 +209,7 @@ private struct OnboardingDocumentFixture {
         root = FileManager.default.temporaryDirectory.appending(path: suite)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,
-                               copyPath: { _ in }, resolveUnsavedChanges: { .cancel })
+                               copyPath: { _ in }, resolveUnsavedChanges: { .cancel }, presentAlert: alerts.present)
         document.saveAutomatically = false
     }
 

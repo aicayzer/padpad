@@ -29,7 +29,7 @@ struct MarkdownBridgeTests {
         try #require(running.processIdentifier == ProcessInfo.processInfo.processIdentifier)
         let oldPolicy = NSApp.activationPolicy()
         let settings = AppSettings(defaults: defaults)
-        let workspace = PadWorkspace(settings: settings, defaults: defaults)
+        let workspace = PadWorkspace(settings: settings, defaults: defaults, presentAlert: AlertRecorder().present)
         workspace.open(file)
         workspace.open(secondFile)
         let document = try #require(workspace.document(at: file))
@@ -105,7 +105,7 @@ struct MarkdownBridgeTests {
         try #require(running.processIdentifier == ProcessInfo.processInfo.processIdentifier)
         let oldPolicy = NSApp.activationPolicy()
         let settings = AppSettings(defaults: defaults)
-        let workspace = PadWorkspace(settings: settings, defaults: defaults)
+        let workspace = PadWorkspace(settings: settings, defaults: defaults, presentAlert: AlertRecorder().present)
         workspace.open(file)
         let document = try #require(workspace.document(at: file))
         let window = try #require(document.nativeWindow)
@@ -214,7 +214,7 @@ struct MarkdownBridgeTests {
         try "First document".write(to: first, atomically: true, encoding: .utf8)
         let source = "Second **document**"
         try source.write(to: second, atomically: true, encoding: .utf8)
-        let document = PadDocument(defaults: defaults, defaultFolder: folder)
+        let document = PadDocument(defaults: defaults, defaultFolder: folder, presentAlert: AlertRecorder().present)
         try #require(document.openDocument(first))
         let window = try #require(document.nativeWindow)
         defer {
@@ -458,7 +458,7 @@ struct MarkdownBridgeTests {
         let refusal = try #require(received.first)
         #expect(refusal.code == "composition")
         #expect(refusal.source == .edit)
-        #expect(refusal.message == "Finish typing, then try that action again.")
+        #expect(refusal.message.text == "Finish typing, then try that action again.")
         try await Task.sleep(for: .milliseconds(100))
         #expect(received.count == 1)
         #expect(editor.isReady)
@@ -674,7 +674,7 @@ struct MarkdownBridgeTests {
         editor.onFeedback(warning, document.documentID)
         #expect(document.editorFeedback == warning)
         #expect(document.error == nil)
-        #expect(warning.message == "Couldn’t apply that edit. Your text is unchanged.")
+        #expect(warning.message.text == "Couldn’t apply that edit. Your text is unchanged.")
 
         // A failed save snapshot remains actionable even after editing recovers.
         let snapshot = document.editorSnapshot
@@ -701,10 +701,13 @@ struct MarkdownBridgeTests {
         _ = try await editor.snapshot()
         #expect(document.editorFeedback == exportWarning)
         let retained = document.text
+        // The pill shows the document error first, so the first click dismisses it and reveals the feedback.
+        document.dismissMessage()
+        #expect(document.error == nil)
+        #expect(document.editorFeedback == exportWarning)
         document.dismissMessage()
         #expect(document.editorFeedback == nil)
         #expect(document.text == retained)
-        #expect(document.error == saveError)
         editor.onFeedback(warning, UUID())
         #expect(document.editorFeedback == nil)
 
@@ -729,7 +732,7 @@ struct MarkdownBridgeTests {
         _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
         let previousAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        let document = PadDocument(defaults: defaults)
+        let document = PadDocument(defaults: defaults, presentAlert: AlertRecorder().present)
         document.newFile()
         let window = try #require(document.nativeWindow)
         defer {
@@ -1048,7 +1051,7 @@ struct MarkdownBridgeTests {
         activation.activates = true
         activation.addsToRecentItems = false
         _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
-        let document = PadDocument(defaults: defaults)
+        let document = PadDocument(defaults: defaults, presentAlert: AlertRecorder().present)
         document.newFile()
         let window = try #require(document.nativeWindow)
         window.setContentSize(NSSize(width: 520, height: 320))
@@ -1091,7 +1094,7 @@ struct MarkdownBridgeTests {
 
     @Test(arguments: [false, true])
     func problemsKeepNativeWindowBoundsAndRecoveryText(fileWindow: Bool) async throws {
-        let suite = "pad-detached-warning-\(UUID().uuidString)"
+        let suite = "pad-problem-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set(true, forKey: "pad.onboardingCompleted")
         defaults.set(false, forKey: "pad.saveAutomatically")
@@ -1101,7 +1104,8 @@ struct MarkdownBridgeTests {
         activation.activates = true
         activation.addsToRecentItems = false
         _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
-        let document = PadDocument(defaults: defaults, role: fileWindow ? .file : .quickPad)
+        let alerts = AlertRecorder()
+        let document = PadDocument(defaults: defaults, role: fileWindow ? .file : .quickPad, presentAlert: alerts.present)
         #expect(document.openDocument(file))
         let window = try #require(document.nativeWindow)
         window.setContentSize(NSSize(width: 520, height: 320))
@@ -1122,34 +1126,40 @@ struct MarkdownBridgeTests {
         try FileManager.default.removeItem(at: file)
         document.refreshIfNeeded()
         let deadline = ContinuousClock.now + .seconds(5)
-        while document.error == nil, ContinuousClock.now < deadline {
+        while alerts.alerts.isEmpty, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(document.error != nil)
-        try await Task.sleep(for: .milliseconds(150))
-        #expect(window.frame == frame)
-        // The message sits inside the editor card, so the editor keeps its size.
-        #expect(abs(editor.webView.bounds.height - editorHeight) <= 1)
+        // A missing file needs a decision, so it is a sheet on this window and never a panel message.
+        #expect(alerts.alerts == [expectedAlert(CocoaError(.fileReadNoSuchFile), during: .read)])
+        #expect(alerts.windows.first == window)
+        #expect(document.error == nil)
+        #expect(!document.isBusy)
         #expect(document.text == retained)
         #expect(document.folderError == nil)
+
+        // A small problem is a pill inside the editor card, so neither the window nor the editor moves.
+        #expect(!document.rename(to: "bad/name"))
+        #expect(document.error == PadError.invalidName.message())
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(window.frame == frame)
+        #expect(abs(editor.webView.bounds.height - editorHeight) <= 1)
         #expect(!window.isOpaque && window.backgroundColor == .clear)
-        #expect(PadWarningContent(try #require(document.error)).guidance == "Choose “Save As” to keep a copy.")
         if ProcessInfo.processInfo.environment["PAD_QA_OUTPUT"] != nil, let content = window.contentView {
             let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: bitmap)
             Attachment.record(try #require(bitmap.representation(using: .png, properties: [:])),
-                              named: "detached-warning-\(fileWindow ? "file" : "quick-pad").png")
-            let warning = PadMessageView(message: try #require(document.error), identifier: "documentError", dismiss: {})
+                              named: "message-\(fileWindow ? "file" : "quick-pad").png")
+            let pill = PadMessageView(message: try #require(document.error), identifier: "documentError", dismiss: {})
                 .frame(width: 520)
                 .environment(\.colorScheme, .light)
                 .background(Color(nsColor: .windowBackgroundColor))
-            let renderer = ImageRenderer(content: warning)
+            let renderer = ImageRenderer(content: pill)
             renderer.scale = 2
             let image = try #require(renderer.nsImage)
             let tiff = try #require(image.tiffRepresentation)
             let rendered = try #require(NSBitmapImageRep(data: tiff))
             Attachment.record(try #require(rendered.representation(using: .png, properties: [:])),
-                              named: "detached-warning-content-\(fileWindow ? "file" : "quick-pad").png")
+                              named: "message-content-\(fileWindow ? "file" : "quick-pad").png")
         }
         window.orderOut(nil)
         #expect(!window.isVisible)
@@ -1159,9 +1169,12 @@ struct MarkdownBridgeTests {
         #expect(window.frame == frame)
         #expect(document.error != nil)
         #expect(document.text == retained)
-        document.error = nil
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(editor.webView.bounds.height >= editorHeight - 1)
+        document.dismissMessage()
+        #expect(document.error == nil)
+        // Focusing the window again rereads the missing file without repeating the alert.
+        document.refreshIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(alerts.alerts.count == 1)
         #expect(window.frame == frame)
     }
 

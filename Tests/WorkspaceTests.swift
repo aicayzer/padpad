@@ -100,6 +100,18 @@ import Testing
         #expect(fixture.workspace.activeDocument === fixture.workspace.quickPad)
     }
 
+    @Test func failedOpenAlertsWithoutAWindowOrQuickPadMessage() throws {
+        let fixture = try WorkspaceFixture()
+        defer { fixture.cleanUp() }
+        let unsupported = try fixture.file("notes.rtf", text: "Rich text")
+        fixture.workspace.open(unsupported)
+        #expect(fixture.workspace.documents.isEmpty)
+        #expect(fixture.alerts.alerts == [PadError.unsupported.alert(during: .open)])
+        #expect(fixture.alerts.windows == [nil])
+        #expect(fixture.workspace.quickPad.error == nil)
+        #expect(!fixture.workspace.quickPad.isBusy)
+    }
+
     @Test func saveAsCannotOverwriteAnotherOpenDocument() async throws {
         let fixture = try WorkspaceFixture()
         defer { fixture.cleanUp() }
@@ -118,7 +130,7 @@ import Testing
         #expect(source.url == original)
         #expect(source.text == "First edits")
         #expect(source.isDirty)
-        #expect(source.error == PadError.nameExists.localizedDescription)
+        #expect(source.error == PadError.nameExists.message(during: .saveAs))
         #expect(other.text == "Unsaved second edits")
         #expect(try String(contentsOf: destination, encoding: .utf8) == "Second")
         #expect(try String(contentsOf: original, encoding: .utf8) == "First")
@@ -153,6 +165,7 @@ private struct WorkspaceFixture {
     let defaults: UserDefaults
     let settings: AppSettings
     let workspace: PadWorkspace
+    let alerts = AlertRecorder()
     private let suite: String
 
     init(automaticSaving: Bool = false) throws {
@@ -165,7 +178,7 @@ private struct WorkspaceFixture {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         settings = AppSettings(defaults: defaults)
         workspace = PadWorkspace(settings: settings, defaults: defaults, presentsWindows: false,
-                                 defaultFolder: root)
+                                 defaultFolder: root, presentAlert: alerts.present)
     }
 
     func file(_ path: String, text: String) throws -> URL {

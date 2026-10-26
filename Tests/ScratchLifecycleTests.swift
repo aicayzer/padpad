@@ -188,7 +188,7 @@ import Testing
         #expect(document.documentID == identity)
         #expect(document.text == "retained draft")
         #expect(document.url == nil)
-        #expect(document.error == "Couldn’t read your text. Try again.")
+        #expect(document.error == expectedMessage(CocoaError(.fileReadUnknown), during: .snapshot))
         #expect(try fixture.savedFiles().isEmpty)
     }
 
@@ -232,7 +232,11 @@ import Testing
         #expect(document.documentID == identity)
         #expect(document.url == file)
         #expect(document.text == (snapshotFails ? "saved" : "last unsaved keystroke"))
-        #expect(document.error != nil)
+        if snapshotFails {
+            #expect(document.error == expectedMessage(CocoaError(.fileReadUnknown), during: .snapshot))
+        } else {
+            #expect(fixture.alerts.last == expectedAlert(CocoaError(.fileReadNoSuchFile), during: .read))
+        }
         #expect(document.folderError == nil)
         document.save()
         await settle(document)
@@ -245,13 +249,14 @@ import Testing
         let file = fixture.root.appending(path: "external.md")
         try Data("Keep this recovery copy".utf8).write(to: file)
         let defaults = try #require(UserDefaults(suiteName: "pad-recovery-\(UUID().uuidString)"))
-        let document = PadDocument(defaults: defaults, presentsWindow: false, role: .file)
+        let alerts = AlertRecorder()
+        let document = PadDocument(defaults: defaults, presentsWindow: false, role: .file, presentAlert: alerts.present)
         #expect(document.openDocument(file))
         try FileManager.default.removeItem(at: file)
         document.refreshIfNeeded()
         #expect(document.url == file)
         #expect(document.text == "Keep this recovery copy")
-        #expect(document.error != nil)
+        #expect(alerts.last?.action == .saveAs)
         document.save()
         #expect(!FileManager.default.fileExists(atPath: file.path))
     }
@@ -267,7 +272,7 @@ import Testing
         document.refreshIfNeeded()
         #expect(document.text == "saved")
         #expect(document.url == file)
-        #expect(document.error != nil)
+        #expect(fixture.alerts.last == PadError.encoding.alert(during: .read))
         #expect(document.folderError == nil)
     }
 
@@ -285,15 +290,6 @@ import Testing
         #expect(try String(contentsOf: shared, encoding: .utf8) == document.text)
         document.save()
         #expect(document.url?.lastPathComponent != "Untitled.md")
-    }
-
-    @Test func recoveryGuidanceHasItsOwnCompactLine() {
-        let warning = PadWarningContent("This file is no longer available. Your text is still open. Choose “Save As” to keep a copy.")
-        #expect(warning.message == "This file is no longer available.")
-        #expect(warning.guidance == "Choose “Save As” to keep a copy.")
-        let edit = PadWarningContent("Couldn’t apply that edit. Your text is unchanged.")
-        #expect(edit.guidance == nil)
-        #expect(edit.message == "Couldn’t apply that edit. Your text is unchanged.")
     }
 
     @Test func terminationWaitsForSnapshotAndRefusesSnapshotFailure() async throws {
@@ -321,6 +317,7 @@ import Testing
 private struct ScratchFixture {
     let root: URL
     let document: PadDocument
+    let alerts = AlertRecorder()
     private let suite: String
     private let defaults: UserDefaults
 
@@ -330,7 +327,8 @@ private struct ScratchFixture {
         root = FileManager.default.temporaryDirectory.appending(path: suite)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,
-                               copyPath: { _ in }, resolveUnsavedChanges: resolveUnsavedChanges)
+                               copyPath: { _ in }, resolveUnsavedChanges: resolveUnsavedChanges,
+                               presentAlert: alerts.present)
         document.saveAutomatically = false
     }
 

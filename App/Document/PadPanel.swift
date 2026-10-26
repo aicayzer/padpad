@@ -811,37 +811,53 @@ struct PadWarningContent {
     }
 }
 
+/// Sizes its child to the text it holds, never wider than `maximum`.
+private struct PadMessageWidth: Layout {
+    let maximum: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews[0].sizeThatFits(ProposedViewSize(width: min(proposal.width ?? maximum, maximum), height: proposal.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
+}
+
 struct PadDocumentWarningView: View {
     let message: String
     let identifier: String
     var dismiss: (() -> Void)?
 
+    // Long enough for a sentence and its hint, short enough to stay a message and not a banner.
+    static let maximumWidth: CGFloat = 420
+
     var body: some View {
         let content = PadWarningContent(message)
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(content.message)
-                if let guidance = content.guidance { Text(guidance).foregroundStyle(.secondary) }
+        PadMessageWidth(maximum: Self.maximumWidth) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(content.message).fontWeight(.medium).accessibilityLabel("Error: \(content.message)")
+                    if let guidance = content.guidance { Text(guidance).foregroundStyle(.secondary) }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(identifier)
+                if let dismiss {
+                    Button("Dismiss Message", systemImage: "xmark", action: dismiss)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                        .help("Dismiss message")
+                        .accessibilityIdentifier("dismissEditorFeedback")
+                }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier(identifier)
-            if let dismiss {
-                Button("Dismiss Message", systemImage: "xmark", action: dismiss)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-                    .help("Dismiss message")
-                    .accessibilityIdentifier("dismissEditorFeedback")
-            }
+            .font(.system(size: 13))
+            .foregroundStyle(.primary)
+            .padding(10)
         }
-        .font(.system(size: 13))
-        .foregroundStyle(.primary)
-        .padding(10)
         .glassEffect(.regular, in: .rect(cornerRadius: 10))
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 7)
         .padding(.bottom, 7)
     }

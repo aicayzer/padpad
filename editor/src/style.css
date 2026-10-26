@@ -11,7 +11,6 @@
   --inkkit-font-size: 1rem;
   /* The caret and selection show text focus; embedded controls keep their keyboard rings. */
   --inkkit-surface-focus-width: 0;
-  --inkkit-line-height: normal;
   --inkkit-padding-top: 10px;
   --inkkit-padding-inline: 16px;
   --inkkit-padding-bottom: 48px;
@@ -28,9 +27,8 @@ body {
 
 body {
   color: var(--inkkit-text-color);
-  /* WebKit paints the native caret using this line box; extra leading stretches it above the text. */
   font:
-    1rem/normal -apple-system,
+    1rem -apple-system,
     BlinkMacSystemFont,
     system-ui,
     sans-serif;

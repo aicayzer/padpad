@@ -442,15 +442,7 @@ struct PadView: View {
                                   onSkip: { files.finishOnboarding(includeExample: false) },
                                   onClose: { files.close() })
             } else {
-                VStack(spacing: 10) {
-                    editorContent
-                    if let message = files.error {
-                        detachedWarning(message, identifier: "documentError")
-                    } else if let feedback = files.editorFeedback {
-                        detachedWarning(feedback.message, identifier: "editorFeedback",
-                                        dismiss: { files.dismissEditorFeedback() })
-                    }
-                }
+                editorContent
             }
         }
         .tint(settings.accentColor)
@@ -640,6 +632,13 @@ struct PadView: View {
             .background(Color(nsColor: .textBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 15))
             .padding([.horizontal, .bottom], 7)
+            // Inside the glass, so the window has no see-through strip under the editor card.
+            if let message = files.error {
+                detachedWarning(message, identifier: "documentError")
+            } else if let feedback = files.editorFeedback {
+                detachedWarning(feedback.message, identifier: "editorFeedback",
+                                dismiss: { files.dismissEditorFeedback() })
+            }
         }
     }
 

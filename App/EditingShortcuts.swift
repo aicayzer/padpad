@@ -91,20 +91,20 @@ final class EditingShortcuts {
         ]
         let navigationKeys: Set<KeyboardShortcuts.Key> = [.leftArrow, .rightArrow, .upArrow, .downArrow, .delete, .deleteForward]
         if nativeCommands.contains(shortcut) || shortcut.key.map({ navigationKeys.contains($0) }) == true {
-            return .disallow(reason: "This shortcut is reserved for editing or an app command.")
+            return .disallow(reason: "PadPad or macOS already uses this shortcut. Choose another one.")
         }
         if globalShortcut() == shortcut {
-            return .disallow(reason: "This shortcut already opens Quick Pad. Choose another shortcut.")
+            return .disallow(reason: "This shortcut already shows or hides PadPad. Choose another one.")
         }
         if let other = EditingAction.allCases.first(where: { $0 != action && shortcuts[$0] == shortcut }) {
-            return .disallow(reason: "This shortcut is already assigned to “\(other.title)”.")
+            return .disallow(reason: "“\(other.title)” already uses this shortcut. Choose another one.")
         }
         return .allow
     }
 
     func validateGlobal(_ shortcut: KeyboardShortcuts.Shortcut) -> KeyboardShortcuts.ValidationResult {
         if let action = EditingAction.allCases.first(where: { shortcuts[$0] == shortcut }) {
-            return .disallow(reason: "This shortcut is already assigned to “\(action.title)”.")
+            return .disallow(reason: "“\(action.title)” already uses this shortcut. Choose another one.")
         }
         return .allow
     }
@@ -122,7 +122,7 @@ final class EditingShortcuts {
 
     func restoreDefaults() {
         if let global = globalShortcut(), Self.standardShortcuts.values.contains(global) {
-            error = "Change the Quick Pad shortcut before restoring these defaults."
+            error = "One of these defaults shows or hides PadPad. Change that shortcut first."
             return
         }
         shortcuts = Self.standardShortcuts

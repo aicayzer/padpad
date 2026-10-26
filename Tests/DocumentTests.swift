@@ -10,7 +10,8 @@ import Testing
         noticeDuration: Duration = .seconds(2),
         selectOpenFile: (@MainActor () async -> URL?)? = nil,
         selectSaveFile: (@MainActor (URL, String) async -> URL?)? = nil,
-        resolveUnsavedChanges: @escaping @MainActor () -> PadUnsavedChangesDecision = { .cancel }
+        resolveUnsavedChanges: @escaping @MainActor () -> PadUnsavedChangesDecision = { .cancel },
+        alerts: AlertRecorder? = nil
     ) throws -> (PadDocument, URL, UserDefaults, () -> String?) {
         let root = FileManager.default.temporaryDirectory.appending(path: "pad-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -21,7 +22,7 @@ import Testing
         let files = PadDocument(defaults: defaults, defaultFolder: root,
                             presentsWindow: false, noticeDuration: noticeDuration, copyPath: { copiedPath = $0 },
                             selectOpenFile: selectOpenFile, selectSaveFile: selectSaveFile,
-                            resolveUnsavedChanges: resolveUnsavedChanges)
+                            resolveUnsavedChanges: resolveUnsavedChanges, presentAlert: alerts?.present)
         return (files, root, defaults, { copiedPath })
     }
 
@@ -93,7 +94,7 @@ import Testing
         #expect(files.notice == nil)
         #expect(!files.rename(to: "../invalid"))
         try await Task.sleep(for: .milliseconds(100))
-        #expect(files.error == PadError.invalidName.localizedDescription)
+        #expect(files.error == PadError.invalidName.message())
     }
 
     @Test func replacingDocumentCancelsPreviousNotice() async throws {
@@ -105,7 +106,7 @@ import Testing
         #expect(files.notice == nil)
         #expect(!files.rename(to: "../invalid"))
         try await Task.sleep(for: .milliseconds(100))
-        #expect(files.error == PadError.invalidName.localizedDescription)
+        #expect(files.error == PadError.invalidName.message())
     }
 
     @Test func commandLineBooleanOverridesDoNotPersistPreferences() throws {
@@ -172,7 +173,8 @@ import Testing
     }
 
     @Test func openedTextRoundTripsAndRefusesExternalOverwrite() throws {
-        let (files, root, _, _) = try fixture()
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         let url = root.appending(path: "opened.txt")
         try Data("first\n".utf8).write(to: url)
@@ -184,7 +186,8 @@ import Testing
         try Data("outside\n".utf8).write(to: url)
         files.text = "my edit\n"
         files.save()
-        #expect(files.error == PadError.changed.localizedDescription)
+        #expect(alerts.last == PadError.changed.alert())
+        #expect(files.error == nil)
         #expect(try String(contentsOf: url, encoding: .utf8) == "outside\n")
     }
 
@@ -352,7 +355,8 @@ import Testing
     }
 
     @Test func reopeningDirtyFileKeepsLocalTextAndReportsConflict() throws {
-        let (files, root, _, _) = try fixture()
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         let url = root.appending(path: "external.txt")
         try Data("original".utf8).write(to: url)
@@ -365,8 +369,13 @@ import Testing
         files.open(url)
         #expect(files.text == "local edit")
         #expect(files.savedText == "original")
-        #expect(files.error == PadError.changed.localizedDescription)
+        #expect(alerts.alerts == [PadError.changed.alert()])
+        // Rereading the same conflict on focus does not alert again; an explicit Save does.
+        files.open(url)
+        #expect(alerts.alerts.count == 1)
         files.save()
+        #expect(alerts.alerts.count == 2)
+        #expect(!files.isBusy)
         #expect(try String(contentsOf: url, encoding: .utf8) == "external edit")
     }
 
@@ -427,10 +436,11 @@ import Testing
     @Test(arguments: [PadFormat.txt, .md], [false, true])
     func hiddenFileEditsSurviveExpiryAndExternalChanges(_ format: PadFormat, _ opened: Bool) throws {
         var prompts = 0
+        let alerts = AlertRecorder()
         let (files, root, _, _) = try fixture(format: format, resolveUnsavedChanges: {
             prompts += 1
             return .cancel
-        })
+        }, alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         files.saveAutomatically = false
         files.reusePeriod = .alwaysNew
@@ -458,14 +468,15 @@ import Testing
         try Data("external edit".utf8).write(to: saved)
         files.toggle(now: start.addingTimeInterval(86_400))
         #expect(files.text == "unsaved edits")
-        #expect(files.error == PadError.changed.localizedDescription)
+        #expect(alerts.last == PadError.changed.alert())
         #expect(prompts == 0)
         #expect(try String(contentsOf: saved, encoding: .utf8) == "external edit")
     }
 
     @Test(arguments: ["new", "open", "quit"], [false, true])
     func saveDecisionProtectsFileOnDestructiveTransitions(_ action: String, _ conflicting: Bool) throws {
-        let (files, root, _, _) = try fixture(resolveUnsavedChanges: { .save })
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(resolveUnsavedChanges: { .save }, alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         files.saveAutomatically = false
         files.text = "original"
@@ -485,7 +496,7 @@ import Testing
             #expect(files.url == saved)
             #expect(files.text == "latest edit")
             #expect(files.isDirty)
-            #expect(files.error == PadError.changed.localizedDescription)
+            #expect(alerts.last == PadError.changed.alert())
         } else {
             #expect(!files.isDirty)
             #expect(files.error == nil)
@@ -532,7 +543,8 @@ import Testing
 
     @Test func canceledAndFailedSaveAsPreserveDocument() async throws {
         let selection = PendingPadSelection()
-        let (files, root, _, _) = try fixture(selectSaveFile: { _, _ in await selection.select() })
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(selectSaveFile: { _, _ in await selection.select() }, alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         files.text = "original"
         files.save()
@@ -552,7 +564,7 @@ import Testing
         #expect(!files.isBusy)
         #expect(files.url == original)
         #expect(files.isDirty)
-        #expect(files.error != nil)
+        #expect(alerts.last?.action == .saveAs)
         #expect(try String(contentsOf: original, encoding: .utf8) == "original")
     }
 
@@ -615,7 +627,8 @@ import Testing
     }
 
     @Test func failedAutosaveBlocksCloseAndDocumentReplacement() throws {
-        let (files, root, _, _) = try fixture()
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         files.text = "saved"
         files.save()
@@ -627,7 +640,7 @@ import Testing
         #expect(!files.canTerminate())
         #expect(files.url == saved)
         #expect(files.text == "local")
-        #expect(files.error == PadError.changed.localizedDescription)
+        #expect(alerts.last == PadError.changed.alert())
         #expect(try String(contentsOf: saved, encoding: .utf8) == "external")
     }
 
@@ -790,16 +803,17 @@ import Testing
     }
 
     @Test func failedGeneratedSaveAsDoesNotConsumeNumber() async throws {
+        let alerts = AlertRecorder()
         let (files, root, defaults, _) = try fixture(selectSaveFile: { directory, name in
             directory.appending(path: "missing").appending(path: name)
-        })
+        }, alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         files.text = "unsaved"
         await files.saveAs()
         #expect(defaults.integer(forKey: "pad.nextNumber") == 0)
         #expect(files.url == nil)
         #expect(files.isDirty)
-        #expect(files.error != nil)
+        #expect(alerts.last?.action == .saveAs)
         #expect(!files.isBusy)
     }
 
@@ -825,7 +839,7 @@ import Testing
         files.nameParts = [.literal("../invalid")]
         files.text = "keep this"
         await files.saveAs()
-        #expect(files.error == PadError.invalidName.localizedDescription)
+        #expect(files.error == PadError.invalidName.message(during: .nameFormat))
         #expect(files.url == nil)
         #expect(files.isDirty)
         #expect(!files.isBusy)
@@ -840,7 +854,7 @@ import Testing
         #expect(files.namePreview == "Invalid filename")
         files.save()
         #expect(files.url == nil)
-        #expect(files.error == PadError.invalidName.localizedDescription)
+        #expect(files.error == PadError.invalidName.message(during: .nameFormat))
         #expect(defaults.integer(forKey: "pad.nextNumber") == 0)
         files.nameParts = PadFilename.defaultParts
         try FileManager.default.removeItem(at: root)
@@ -937,7 +951,8 @@ import Testing
     }
 
     @Test func renameRefusesCollisionsInvalidNamesAndExternalChanges() throws {
-        let (files, root, _, _) = try fixture()
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
         let original = root.appending(path: "original.txt")
         let existing = root.appending(path: "existing.txt")
@@ -946,19 +961,20 @@ import Testing
         files.open(original)
         files.text = "local edit"
         #expect(!files.rename(to: "existing"))
-        #expect(files.error == PadError.nameExists.localizedDescription)
+        #expect(files.error == PadError.nameExists.message())
         #expect(files.url == original)
         #expect(try String(contentsOf: existing, encoding: .utf8) == "keep")
         for invalid in ["", "   ", ".", "..", "../escape", "a/b", "a\\b", "a:b", "a\n", String(repeating: "x", count: 253)] {
             #expect(!files.rename(to: invalid))
             let expected: PadError = invalid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? .emptyName : invalid.utf8.count > 252 ? .nameTooLong : .invalidName
-            #expect(files.error == expected.localizedDescription)
+            #expect(files.error == expected.message())
             #expect(files.url == original)
         }
         try Data("external edit".utf8).write(to: original)
         #expect(!files.rename(to: "new"))
-        #expect(files.error == PadError.changed.localizedDescription)
+        #expect(alerts.last == PadError.changed.alert())
+        #expect(files.error == nil)
         #expect(files.text == "local edit")
         #expect(files.savedText == "original")
         #expect(try String(contentsOf: original, encoding: .utf8) == "external edit")
@@ -975,7 +991,7 @@ import Testing
         #expect(files.url == nil)
         #expect(files.displayName == "Untitled")
         #expect(files.isDirty)
-        #expect(files.error == PadError.nameExists.localizedDescription)
+        #expect(files.error == PadError.nameExists.message())
         #expect(try String(contentsOf: existing, encoding: .utf8) == "keep")
         #expect(defaults.integer(forKey: "pad.nextNumber") == 0)
         // A unique name is accepted; a later collision is still caught by Save.
@@ -985,7 +1001,7 @@ import Testing
         files.save()
         #expect(files.url == nil)
         #expect(files.displayName == "Unique.txt")
-        #expect(files.error == PadError.nameExists.localizedDescription)
+        #expect(files.error == PadError.nameExists.message())
         #expect(try String(contentsOf: unique, encoding: .utf8) == "arrived later")
     }
 }

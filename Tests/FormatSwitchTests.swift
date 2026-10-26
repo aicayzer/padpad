@@ -41,7 +41,7 @@ import Testing
         #expect(document.currentFormat == .md)
         #expect(document.text == "Keep this")
         #expect(document.documentID == id)
-        #expect(document.error == "Couldn’t read your text. Try again.")
+        #expect(document.error == expectedMessage(CocoaError(.fileReadUnknown), during: .snapshot))
         #expect(!document.isBusy)
     }
 
@@ -118,7 +118,7 @@ import Testing
         #expect(document.url == original)
         #expect(document.text == "latest edit")
         #expect(document.isDirty)
-        #expect(document.error == PadError.nameExists.localizedDescription)
+        #expect(document.error == PadError.nameExists.message(during: .saveAs))
         #expect(try String(contentsOf: sibling, encoding: .utf8) == "existing sibling")
     }
 

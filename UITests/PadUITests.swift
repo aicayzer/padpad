@@ -169,12 +169,16 @@ final class PadUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         app.typeText("Invalid/name")
         editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)).click()
-        let error = app.staticTexts["documentError"].firstMatch
+        let error = app.buttons["documentError"].firstMatch
         XCTAssertTrue(error.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["\(stem).txt"].firstMatch.exists)
         app.typeKey(.downArrow, modifierFlags: .command)
         app.typeText(" after error")
         expectValue("Keep this text still editable after error", in: editor)
+        error.click()
+        XCTAssertTrue(error.waitForNonExistence(timeout: 5))
+        app.typeText(".")
+        expectValue("Keep this text still editable after error.", in: editor)
     }
 
     func testSettingsPreservesScratchAndEditorAcceptsInput() throws {

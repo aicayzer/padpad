@@ -15,7 +15,7 @@ struct PanelTests {
         defaults.set("txt", forKey: "pad.format")
         defaults.set(false, forKey: "pad.saveAutomatically")
         defaults.set(floating, forKey: "pad.floating")
-        let document = PadDocument(defaults: defaults)
+        let document = PadDocument(defaults: defaults, presentAlert: AlertRecorder().present)
         defer {
             document.close()
             document.nativeWindow?.contentView = nil
@@ -43,7 +43,7 @@ struct PanelTests {
         defaults.set(true, forKey: "pad.onboardingCompleted")
         defaults.set("md", forKey: "pad.format")
         let folder = FileManager.default.temporaryDirectory.appending(path: suite)
-        let document = PadDocument(defaults: defaults, defaultFolder: folder)
+        let document = PadDocument(defaults: defaults, defaultFolder: folder, presentAlert: AlertRecorder().present)
         let initialWindows = Set(NSApp.windows.map(ObjectIdentifier.init))
         document.newFile()
         let panel = try #require(NSApp.windows.compactMap { $0 as? PadPanel }.first {
@@ -71,7 +71,7 @@ struct PanelTests {
         defaults.set(true, forKey: "pad.onboardingCompleted")
         defaults.set("txt", forKey: "pad.format")
         defaults.set(false, forKey: "pad.saveAutomatically")
-        let document = PadDocument(defaults: defaults)
+        let document = PadDocument(defaults: defaults, presentAlert: AlertRecorder().present)
         defer {
             document.editorSnapshot = nil
             document.text = document.savedText
@@ -104,7 +104,7 @@ struct PanelTests {
         try Data("First".utf8).write(to: firstURL)
         try Data("Second".utf8).write(to: secondURL)
         let settings = AppSettings(defaults: defaults)
-        let workspace = PadWorkspace(settings: settings, defaults: defaults, defaultFolder: root)
+        let workspace = PadWorkspace(settings: settings, defaults: defaults, defaultFolder: root, presentAlert: AlertRecorder().present)
         let quick = workspace.quickPad
         defer {
             for document in workspace.allDocuments {
@@ -147,9 +147,10 @@ struct PanelTests {
         #expect(try String(contentsOf: firstURL, encoding: .utf8) == "First saved")
         #expect(!first.rename(to: "second"))
         #expect(first.url == firstURL)
-        #expect(first.error == PadError.nameExists.localizedDescription)
+        #expect(first.error == PadError.nameExists.message())
         #expect(try String(contentsOf: secondURL, encoding: .utf8) == "Second")
-        first.error = nil
+        first.dismissMessage()
+        #expect(first.error == nil)
 
         func clickCloseDecision(_ title: String) async throws {
             first.close()
@@ -207,7 +208,7 @@ struct PanelTests {
         defaults.set("txt", forKey: "pad.format")
         let settings = AppSettings(defaults: defaults)
         let workspace = PadWorkspace(settings: settings, defaults: defaults, defaultFolder: root,
-                                     noticeDuration: .milliseconds(150))
+                                     noticeDuration: .milliseconds(150), presentAlert: AlertRecorder().present)
         let document = workspace.quickPad
         let initialWindows = Set(NSApp.windows.map(ObjectIdentifier.init))
         let trace = PanelActivationTrace()
@@ -322,7 +323,8 @@ struct PanelTests {
         let suite = "pad-close-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set("txt", forKey: "pad.format")
-        let document = PadDocument(defaults: defaults, defaultFolder: root, copyPath: { _ in })
+        let alerts = AlertRecorder()
+        let document = PadDocument(defaults: defaults, defaultFolder: root, copyPath: { _ in }, presentAlert: alerts.present)
         defer {
             document.saveAutomatically = false
             document.text = document.savedText
@@ -335,7 +337,9 @@ struct PanelTests {
         document.close()
         #expect(document.isVisible)
         #expect(document.isDirty)
-        #expect(document.error != nil)
+        #expect(alerts.alerts.count == 1)
+        #expect(alerts.last?.buttons == ["Save As…", "Cancel"])
+        #expect(alerts.windows.first??.isVisible == true)
         #expect(!document.isBusy)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         document.close()

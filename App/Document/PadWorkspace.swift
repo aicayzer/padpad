@@ -14,14 +14,18 @@ final class PadWorkspace {
     private let presentsWindows: Bool
     private(set) var isTransitioning = false
     private(set) var resetError: String?
+    private let presentAlert: PadAlert.Presenter?
 
     init(settings: AppSettings, defaults: UserDefaults = .standard, presentsWindows: Bool = true,
-         defaultFolder: URL? = nil, noticeDuration: Duration = .seconds(2)) {
+         defaultFolder: URL? = nil, noticeDuration: Duration = .seconds(2),
+         presentAlert: PadAlert.Presenter? = nil) {
         self.settings = settings
         self.defaults = defaults
         self.presentsWindows = presentsWindows
+        self.presentAlert = presentAlert
         let pad = PadDocument(defaults: defaults, defaultFolder: defaultFolder,
-                              presentsWindow: presentsWindows, noticeDuration: noticeDuration)
+                              presentsWindow: presentsWindows, noticeDuration: noticeDuration,
+                              presentAlert: presentAlert)
         quickPad = pad
         focusedDocument = pad
         pad.appSettings = settings
@@ -49,17 +53,16 @@ final class PadWorkspace {
         }
         let document = PadDocument(defaults: defaults, defaultFolder: quickPad.folder,
                                    presentsWindow: presentsWindows, role: .file,
-                                   editingShortcuts: quickPad.editingShortcuts)
+                                   editingShortcuts: quickPad.editingShortcuts, presentAlert: presentAlert)
         document.appSettings = settings
         document.workspace = self
         documents.append(document)
         // Activate before presenting the first file; minimization does not remove this membership.
         settings.hasFileWindows = true
+        // A file that fails to open reports its own alert and never gets a window.
         if !document.openDocument(file) {
             documents.removeAll { $0 === document }
             settings.hasFileWindows = !documents.isEmpty
-            quickPad.error = document.error
-            quickPad.show()
         } else {
             focusedDocument = document
         }
@@ -126,7 +129,7 @@ final class PadWorkspace {
         resetError = nil
         for document in allDocuments {
             guard await document.captureForReset() else {
-                resetError = "Couldn’t reset PadPad. Your writing is still open."
+                resetError = "Couldn’t reset PadPad. Try again."
                 return
             }
         }

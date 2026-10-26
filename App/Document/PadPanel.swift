@@ -442,15 +442,7 @@ struct PadView: View {
                                   onSkip: { files.finishOnboarding(includeExample: false) },
                                   onClose: { files.close() })
             } else {
-                VStack(spacing: 10) {
-                    editorContent
-                    if let message = files.error {
-                        detachedWarning(message, identifier: "documentError")
-                    } else if let feedback = files.editorFeedback {
-                        detachedWarning(feedback.message, identifier: "editorFeedback",
-                                        dismiss: { files.dismissEditorFeedback() })
-                    }
-                }
+                editorContent
             }
         }
         .tint(settings.accentColor)
@@ -618,9 +610,9 @@ struct PadView: View {
                         .padding([.horizontal, .top], 10)
                 }
                 HStack(alignment: .bottom, spacing: 12) {
-                    if files.error == nil, files.editorFeedback == nil, let message = files.notice {
-                        documentMessage(message, identifier: "documentNotice")
-                    }
+                    message
+                        // The message takes the room it needs before the spacer, so it wraps only at its maximum.
+                        .layoutPriority(1)
                     Spacer(minLength: 0)
                     if settings.showFormatToggle, files.isQuickPad, files.url == nil {
                         Button(files.currentFormat.title) {
@@ -633,8 +625,7 @@ struct PadView: View {
                         .help(files.currentFormat == .md ? "Switch to plain text" : "Switch to Markdown")
                     }
                 }
-                .padding(.leading, 18)
-                .padding(.trailing, 10)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 8)
             }
             .background(Color(nsColor: .textBackgroundColor))
@@ -643,23 +634,14 @@ struct PadView: View {
         }
     }
 
-    private func detachedWarning(_ message: String, identifier: String,
-                                 dismiss: (() -> Void)? = nil) -> some View {
-        PadDocumentWarningView(message: message, identifier: identifier, dismiss: dismiss)
-    }
-
-    private func documentMessage(_ message: String, identifier: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(message)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier(identifier)
-                .accessibilityLabel(message)
+    @ViewBuilder private var message: some View {
+        if let error = files.error {
+            PadMessageView(message: error, identifier: "documentError", dismiss: { files.dismissMessage() })
+        } else if let feedback = files.editorFeedback {
+            PadMessageView(message: feedback.message, identifier: "editorFeedback", dismiss: { files.dismissMessage() })
+        } else if let notice = files.notice {
+            PadMessageView(message: PadMessage(text: notice), identifier: "documentNotice")
         }
-        .font(.system(size: 13))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(.regular, in: .rect(cornerRadius: 10))
     }
 
     private var editorContent: some View {
@@ -795,55 +777,61 @@ private struct EditorFocusMount: NSViewRepresentable {
     }
 }
 
-struct PadWarningContent {
-    let message: String
-    let guidance: String?
+/// Sizes its child to the text it holds, never wider than `maximum`.
+private struct PadMessageWidth: Layout {
+    let maximum: CGFloat
 
-    init(_ error: String) {
-        // These are PadPad's own messages. Keep actionable recovery on its own line.
-        if let recovery = error.range(of: " Choose ") {
-            message = String(error[..<recovery.lowerBound])
-                .replacingOccurrences(of: " Your text is still open.", with: "")
-            guidance = String(error[error.index(after: recovery.lowerBound)...])
-        } else {
-            message = error
-            guidance = nil
-        }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews[0].sizeThatFits(ProposedViewSize(width: min(proposal.width ?? maximum, maximum), height: proposal.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }
 
-struct PadDocumentWarningView: View {
-    let message: String
+/// One message pill for the whole app. A confirmation clears itself; a problem stays until it is clicked or its cause goes away.
+struct PadMessageView: View {
+    let message: PadMessage
     let identifier: String
+    /// Present for problems only: clicking anywhere on the pill dismisses it.
     var dismiss: (() -> Void)?
 
+    // Long enough for a sentence and its hint, short enough to stay a message and not a banner.
+    static let maximumWidth: CGFloat = 420
+
     var body: some View {
-        let content = PadWarningContent(message)
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(content.message)
-                if let guidance = content.guidance { Text(guidance).foregroundStyle(.secondary) }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier(identifier)
+        PadMessageWidth(maximum: Self.maximumWidth) {
             if let dismiss {
-                Button("Dismiss Message", systemImage: "xmark", action: dismiss)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-                    .help("Dismiss message")
-                    .accessibilityIdentifier("dismissEditorFeedback")
+                Button(action: dismiss) {
+                    pill {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(message.text).fontWeight(.medium).foregroundStyle(.primary)
+                            if let hint = message.hint { Text(hint).foregroundStyle(.secondary) }
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+                .accessibilityLabel("Error: \([message.text, message.hint].compactMap(\.self).joined(separator: " "))")
+                .accessibilityHint("Dismiss")
+                .accessibilityIdentifier(identifier)
+            } else {
+                pill { Text(message.text).foregroundStyle(.secondary) }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(identifier)
             }
         }
-        .font(.system(size: 13))
-        .foregroundStyle(.primary)
-        .padding(10)
-        .glassEffect(.regular, in: .rect(cornerRadius: 10))
-        .padding(.horizontal, 7)
-        .padding(.bottom, 7)
+    }
+
+    private func pill(@ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .font(.system(size: 13))
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(.rect(cornerRadius: 10))
+            .glassEffect(.regular, in: .rect(cornerRadius: 10))
     }
 }

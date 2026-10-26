@@ -27,7 +27,7 @@ enum PadReuse: Int, CaseIterable, Identifiable {
     }
 }
 
-enum PadError: LocalizedError {
+enum PadError: Error {
     case unsupported
     case encoding
     case changed
@@ -38,21 +38,6 @@ enum PadError: LocalizedError {
     case nameExists
     case renamePermission
     case emptyShare
-
-    var errorDescription: String? {
-        switch self {
-        case .emptyShare: "Write something before sharing."
-        case .unsupported: "Choose a Markdown (.md) or text (.txt) file."
-        case .encoding: "PadPad can’t read this file’s text encoding."
-        case .changed: "This file changed elsewhere. Choose “Save As” to keep your changes."
-        case .missingFolder: "This folder is unavailable. Choose it again in Settings → Files."
-        case .emptyName: "Enter a file name."
-        case .nameTooLong: "This file name is too long. Try a shorter one."
-        case .invalidName: "This file name isn’t valid. Try another name."
-        case .nameExists: "A file with this name already exists. Choose another name."
-        case .renamePermission: "PadPad needs folder access to rename this file. Choose “Save As”."
-        }
-    }
 }
 
 enum PadUnsavedChangesDecision {
@@ -104,9 +89,16 @@ final class PadDocument {
     var settingsPresented = false
     var showSettings: @MainActor () -> Void = {}
     private(set) var renameRequest = 0
-    var error: String?
+    /// A small problem shown in the panel. Problems that need a decision are alerts instead.
+    private(set) var error: PadMessage? {
+        didSet { if let error, error != oldValue { announceProblem(error) } }
+    }
+    /// The alert on screen. Its document is busy until the alert closes.
+    private(set) var alert: PadAlert?
     private(set) var folderError: String?
-    private(set) var editorFeedback: PadMarkdownEditorFeedback?
+    private(set) var editorFeedback: PadMarkdownEditorFeedback? {
+        didSet { if let editorFeedback, editorFeedback != oldValue { announceProblem(editorFeedback.message) } }
+    }
     private(set) var notice: String? {
         didSet {
             noticeTask?.cancel()
@@ -149,6 +141,9 @@ final class PadDocument {
     private let selectSaveFolder: (@MainActor (URL) -> URL?)?
     private let selectSaveFile: (@MainActor (URL, String) async -> URL?)?
     private let resolveUnsavedChanges: (@MainActor () -> PadUnsavedChangesDecision)?
+    private let presentAlert: PadAlert.Presenter
+    // Window focus rereads the file; an unchanged failure must not alert again on every focus.
+    private var reportedReadAlert: PadAlert?
 
     private static let floatingKey = "pad.floating"
     private static let formatKey = "pad.format"
@@ -177,7 +172,8 @@ final class PadDocument {
          selectOpenFile: (@MainActor () async -> URL?)? = nil,
          selectSaveFile: (@MainActor (URL, String) async -> URL?)? = nil,
          selectSaveFolder: (@MainActor (URL) -> URL?)? = nil,
-         resolveUnsavedChanges: (@MainActor () -> PadUnsavedChangesDecision)? = nil) {
+         resolveUnsavedChanges: (@MainActor () -> PadUnsavedChangesDecision)? = nil,
+         presentAlert: PadAlert.Presenter? = nil) {
         self.role = role
         self.noticeDuration = noticeDuration
         self.defaults = defaults
@@ -189,6 +185,9 @@ final class PadDocument {
         self.selectSaveFile = selectSaveFile
         self.selectSaveFolder = selectSaveFolder
         self.resolveUnsavedChanges = resolveUnsavedChanges
+        // A document without windows has nowhere to show an alert, so tests never see a modal.
+        let headless: PadAlert.Presenter = { _, _, completion in completion(false) }
+        self.presentAlert = presentAlert ?? (presentsWindow ? PadAlert.presentSystem : headless)
         #if DEBUG
         let defaultFloating = false
         #else
@@ -219,7 +218,7 @@ final class PadDocument {
 
     var isDirty: Bool { text != savedText }
     var canShare: Bool { !text.isEmpty && !isBusy }
-    var isBusy: Bool { operation != nil }
+    var isBusy: Bool { operation != nil || alert != nil }
     var isVisible: Bool { panel?.isVisible == true }
     var isDefaultFolder: Bool { folder.standardizedFileURL == Self.downloadsFolder.standardizedFileURL }
     var needsFolderSelection: Bool { !hasSaveFolderAccess }
@@ -252,7 +251,7 @@ final class PadDocument {
                 operation.showsPrintPanel = true
                 operation.run()
             }
-        } catch { self.error = readableError(error, fallback: "Couldn’t print your text. Try again.") }
+        } catch { report(error, during: .print) }
     }
 
     func mountMarkdownEditor() {
@@ -269,7 +268,7 @@ final class PadDocument {
         }
         editor.onError = { [weak self] error in
             guard let self, self.currentFormat == .md, !self.onboarding.isPresented else { return }
-            self.error = readableError(error, fallback: "The editor couldn’t complete that action. Your text is still open.")
+            self.report(error, during: .editor)
         }
         editor.onReady = { [weak self] in
             guard let self, !self.onboarding.isPresented, self.currentFormat == .md else { return }
@@ -311,11 +310,20 @@ final class PadDocument {
         return true
     }
 
-    func dismissEditorFeedback() {
-        editorFeedback = nil
+    /// Clicking the message pill clears the problem it shows: a document error first, then editor feedback.
+    func dismissMessage() {
+        if error != nil { error = nil } else { editorFeedback = nil }
         guard nativeWindow?.isKeyWindow == true, let editor = markdownEditor,
               !editor.showingFind, !editor.showingLink else { return }
         editor.focus()
+    }
+
+    // A pill is not focused when it appears, so VoiceOver would otherwise miss it.
+    private func announceProblem(_ message: PadMessage) {
+        let announcement = [message.text, message.hint].compactMap(\.self).joined(separator: " ")
+        NSAccessibility.post(element: (nativeWindow as NSObject?) ?? NSApplication.shared, notification: .announcementRequested,
+                             userInfo: [.announcement: "Error: \(announcement)",
+                                        .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     private func reloadEditor() {
@@ -339,7 +347,7 @@ final class PadDocument {
             text = latest ?? editorLoadedSource
             return true
         } catch {
-            self.error = "Couldn’t read your text. Try again."
+            report(error, during: .snapshot)
             onboarding.dismiss()
             show()
             if !isActive, !onboarding.isPresented { panel?.resumeEditor() }
@@ -392,7 +400,7 @@ final class PadDocument {
             try contents.write(to: pasteboard)
             notice = "Copied"
         } catch {
-            self.error = "Couldn’t copy your text. Try again."
+            report(error, during: .copy)
         }
     }
 
@@ -484,7 +492,7 @@ final class PadDocument {
         do {
             try rememberSaveFolder(chosen)
             folderError = nil
-        } catch { folderError = readableError(error, fallback: "Couldn’t use this folder. Choose another folder.") }
+        } catch { folderError = "PadPad can’t use this folder. Choose another one." }
     }
 
     private func saveFolderPicker(directory: URL) -> NSOpenPanel {
@@ -615,6 +623,7 @@ final class PadDocument {
         text = ""
         savedText = ""
         error = nil
+        reportedReadAlert = nil
         notice = nil
         dismissedAt = nil
         pendingName = nil
@@ -652,10 +661,10 @@ final class PadDocument {
     func openDocument(_ file: URL) -> Bool {
         let leavingOnboarding = onboarding.isPresented
         guard ["txt", "md"].contains(file.pathExtension.lowercased()) else {
-            error = PadError.unsupported.localizedDescription
             onboarding.dismiss()
             if isQuickPad || url != nil { show() }
             if leavingOnboarding { panel?.resumeEditor() }
+            report(PadError.unsupported, during: .open)
             return false
         }
         if file.standardizedFileURL == url?.standardizedFileURL {
@@ -691,6 +700,7 @@ final class PadDocument {
             onboarding.dismiss()
             pendingName = nil
             error = nil
+            reportedReadAlert = nil
             notice = nil
             panel?.prepareReading()
             reloadEditor()
@@ -698,10 +708,10 @@ final class PadDocument {
             return true
         } catch {
             if accessing { file.stopAccessingSecurityScopedResource() }
-            self.error = readableError(error, fallback: "Couldn’t open this file. Try opening it again.")
             onboarding.dismiss()
             if isQuickPad || url != nil { show() }
             if leavingOnboarding { panel?.resumeEditor() }
+            report(error, during: .open)
             return false
         }
     }
@@ -729,6 +739,7 @@ final class PadDocument {
                 reloadEditor()
             }
             error = nil
+            reportedReadAlert = nil
         } catch {
             let failure = error as NSError
             // Only a confirmed missing file permits discarding a clean quick pad.
@@ -738,8 +749,7 @@ final class PadDocument {
                 resetDocument()
                 return
             }
-            self.error = readableError(error, fallback: "Couldn’t read this file. Your text is still open. Choose Save As to keep a copy.")
-            notice = nil
+            report(error, during: .read)
         }
     }
 
@@ -750,6 +760,7 @@ final class PadDocument {
     }
 
     private func saveCurrent() {
+        let namesFile = url == nil && pendingName == nil
         do {
             if let url {
                 guard try Data(contentsOf: url) == baseline else { throw PadError.changed }
@@ -778,8 +789,9 @@ final class PadDocument {
                 notice = "Saved. Path copied."
             }
             error = nil
+            reportedReadAlert = nil
             updateTitle()
-        } catch { self.error = readableError(error, fallback: "Couldn’t save your changes. Your text is still open."); notice = nil }
+        } catch { report(error, during: namesFile ? .nameFormat : .save) }
     }
 
     func toggleFormat() async {
@@ -823,8 +835,7 @@ final class PadDocument {
                 suggestion = (generated.url.lastPathComponent, generated.number)
             }
         } catch {
-            self.error = readableError(error, fallback: "Couldn’t create a file name. Check your naming settings.")
-            notice = nil
+            report(error, during: url == nil && pendingName == nil ? .nameFormat : .saveAs)
             return
         }
         let destination = if let selectSaveFile {
@@ -863,12 +874,12 @@ final class PadDocument {
                 advanceGeneratedNumber(after: number)
             }
             error = nil
+            reportedReadAlert = nil
             notice = "Saved"
             updateTitle()
         } catch {
             if accessing { destination.stopAccessingSecurityScopedResource() }
-            self.error = readableError(error, fallback: "Couldn’t save your changes. Your text is still open.")
-            notice = nil
+            report(error, during: .saveAs)
         }
     }
 
@@ -908,7 +919,7 @@ final class PadDocument {
             error = nil
         } catch {
             operation = nil
-            self.error = readableError(error, fallback: "Couldn’t share this file. Try again.")
+            report(error, during: .share)
         }
     }
 
@@ -1122,28 +1133,39 @@ final class PadDocument {
             updateTitle()
             return true
         } catch {
-            self.error = readableError(error, fallback: "Couldn’t rename this file. Try another name or choose “Save As”.")
-            notice = nil
+            report(error, during: .rename)
             return false
         }
     }
 
-    private func readableError(_ error: any Error, fallback: String) -> String {
-        if let error = error as? PadError { return error.localizedDescription }
-        if let error = error as? PadMarkdownEditorError { return error.localizedDescription }
-        if let error = error as? CocoaError {
-            switch error.code {
-            case .fileReadNoSuchFile: return "This file is no longer available. Your text is still open. Choose “Save As” to keep a copy."
-            case .fileReadNoPermission:
-                return "PadPad can’t access this file. Choose it again with “Open File”."
-            case .fileWriteNoPermission:
-                return "PadPad can’t save in this folder. Choose “Save As”."
-            case .fileWriteOutOfSpace: return "There isn’t enough storage to save. Free up some space and try again."
-            case .fileWriteFileExists: return PadError.nameExists.localizedDescription
-            default: break
+    private func report(_ error: any Error, during context: PadProblem.Context) {
+        notice = nil
+        switch PadProblem(error, during: context) {
+        case .message(let message):
+            self.error = message
+        case .alert(let alert):
+            if context == .read {
+                guard alert != reportedReadAlert else { return }
+                reportedReadAlert = alert
+            }
+            self.error = nil
+            present(alert)
+        }
+    }
+
+    private func present(_ alert: PadAlert) {
+        guard self.alert == nil else { return }
+        self.alert = alert
+        let window = nativeWindow?.isVisible == true ? nativeWindow : nil
+        presentAlert(alert, window) { confirmed in
+            self.alert = nil
+            guard confirmed, let action = alert.action else { return }
+            switch action {
+            case .saveAs: Task { await self.saveAs() }
+            case .openSettings: self.showSettings()
+            case .chooseFile: Task { await (self.workspace?.activeDocument ?? self).openPicker() }
             }
         }
-        return fallback
     }
 
     private func canRenameInContainingFolder(_ source: URL) -> Bool {

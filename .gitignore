@@ -23,3 +23,6 @@ _ignore/
 
 editor/node_modules/
 editor/dist/
+
+# Records kept beside the code, synced to Marfa (not part of this repository)
+/marfa/

@@ -115,6 +115,8 @@ final class PadDocument {
     private var folderScope: URL?
     private var panel: (any PadDocumentWindow)?
     private var dismissedAt: Date?
+    /// The format of a draft that has no file. Assign it only through `replaceDraft`, so the stored text
+    /// always matches its format: RTF text is JSON, and Markdown or plain text written over it would be lost.
     private var scratchFormat: PadFormat
     private var snapshotApplied = false
     private var editorLoadedSource = ""
@@ -446,8 +448,7 @@ final class PadDocument {
     func finishOnboarding(includeExample: Bool) {
         guard !isBusy, onboarding.isPresented else { return }
         if includeExample, isPristineScratch {
-            scratchFormat = .md
-            text = """
+            replaceDraft(format: .md, text: """
             # A little room to think
 
             Write a thought here. **Keep what matters.**
@@ -460,7 +461,7 @@ final class PadDocument {
 
             > Your shortcut brings this pad back whenever you need it.
 
-            """
+            """)
         }
         onboarding.complete()
         reloadEditor()
@@ -616,12 +617,11 @@ final class PadDocument {
         startsInReadingMode = false
         pendingReadingDocumentID = nil
         documentID = UUID()
-        scratchFormat = format
         documentScope?.stopAccessingSecurityScopedResource()
         documentScope = nil
         url = nil
         baseline = nil
-        text = ""
+        replaceDraft(format: format, text: "")
         savedText = ""
         error = nil
         reportedReadAlert = nil
@@ -821,14 +821,19 @@ final class PadDocument {
             panel?.resumeEditor()
             return
         }
-        scratchFormat = target
-        text = conversion.text
+        replaceDraft(format: target, text: conversion.text)
         reloadEditor()
         error = nil
         notice = nil
         updateTitle()
         show()
         panel?.resumeEditor()
+    }
+
+    /// Changes a draft's format and text together. An empty text is valid in every format.
+    private func replaceDraft(format newFormat: PadFormat, text newText: String) {
+        scratchFormat = newFormat
+        text = newText
     }
 
     /// Converts text from the current format. Markdown and plain text share their source. Markdown and RTF
@@ -1142,9 +1147,8 @@ final class PadDocument {
 
     func resetQuickPadPreferences() {
         floating = true
-        if url == nil { format = .md }
-        scratchFormat = .md
-        defaults.set(PadFormat.md.rawValue, forKey: Self.formatKey)
+        // The default applies to future drafts; the current draft keeps its format and text.
+        format = .md
         saveAutomatically = false
         reusePeriod = .fifteenMinutes
         nameParts = PadFilename.defaultParts

@@ -222,6 +222,34 @@ import Testing
         ]))
     }
 
+    @Test func resetKeepsAConvertedDraftAndSavesItAsRTF() async throws {
+        let fixture = try FormatSwitchFixture(format: .txt, choosesSaveFolder: true)
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "Draft line"
+        await document.changeFormat(to: .rtf)
+        let converted = document.text
+        #expect(document.currentFormat == .rtf)
+        document.resetQuickPadPreferences()
+        // Reset changes the default for future drafts only.
+        #expect(document.format == .md)
+        #expect(fixture.defaults.string(forKey: "pad.format") == "md")
+        #expect(document.currentFormat == .rtf)
+        #expect(document.text == converted)
+        #expect(document.displayName == "Untitled")
+        // Reset forgets the save folder, so choose it again, then save.
+        fixture.selectedFolder = fixture.root
+        document.save()
+        let saved = try #require(document.url)
+        #expect(saved.pathExtension == "rtf")
+        #expect(try RTFConverter.document(contentsOf: saved).plainText == "Draft line")
+        #expect(!document.isDirty)
+        // The next draft uses the reset default.
+        document.newFile()
+        #expect(document.currentFormat == .md)
+        #expect(document.text.isEmpty)
+    }
+
     @Test(arguments: [false, true])
     func rtfToPlainTextAlwaysConfirms(confirms: Bool) async throws {
         let alerts = AlertRecorder()
@@ -313,17 +341,28 @@ private struct FormatSwitchFixture {
     let defaults: UserDefaults
     let document: PadDocument
     private let suite: String
+    private let folder: FolderChoice
+    /// The folder the save-folder chooser returns, when the fixture has one.
+    var selectedFolder: URL? {
+        get { folder.url }
+        nonmutating set { folder.url = newValue }
+    }
 
     init(format: PadFormat = .md, selectSaveFile: (@MainActor (URL, String) async -> URL?)? = nil,
-         alerts: AlertRecorder? = nil) throws {
+         choosesSaveFolder: Bool = false, alerts: AlertRecorder? = nil) throws {
+        let choice = FolderChoice()
+        folder = choice
         suite = "pad-format-tests-\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set(format.rawValue, forKey: "pad.format")
         root = FileManager.default.temporaryDirectory.appending(path: suite)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var chooser: (@MainActor (URL) -> URL?)?
+        if choosesSaveFolder { chooser = { _ in choice.url } }
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,
-                               copyPath: { _ in }, selectSaveFile: selectSaveFile, resolveUnsavedChanges: { .cancel },
-                               presentAlert: alerts?.present)
+                               copyPath: { _ in }, selectSaveFile: selectSaveFile,
+                               selectSaveFolder: chooser,
+                               resolveUnsavedChanges: { .cancel }, presentAlert: alerts?.present)
         document.saveAutomatically = false
     }
 
@@ -335,4 +374,9 @@ private struct FormatSwitchFixture {
         try? FileManager.default.removeItem(at: root)
         defaults.removePersistentDomain(forName: suite)
     }
+}
+
+@MainActor
+private final class FolderChoice {
+    var url: URL?
 }

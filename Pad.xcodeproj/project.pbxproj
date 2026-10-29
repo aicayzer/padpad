@@ -58,6 +58,7 @@
 		A39D74D8824C139527DE23BB /* textedit-table.json in Resources */ = {isa = PBXBuildFile; fileRef = 2AEF8FD15EDB1D6F34109B5E /* textedit-table.json */; };
 		A773212ECD37748C92EC805B /* Commands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FEF301DA1CA940EC7E4697 /* Commands.swift */; };
 		AEECD88F21AC692E219E1451 /* AppIconDEV.icon in Resources */ = {isa = PBXBuildFile; fileRef = 621D41FA4140656C065BF7AB /* AppIconDEV.icon */; };
+		AFE747F145D57B57DFFC2CC4 /* tm-image-rtfd-text.rtf in Resources */ = {isa = PBXBuildFile; fileRef = 14A4B1D632DA3B195C6D5D2B /* tm-image-rtfd-text.rtf */; };
 		B1F5177795B98FEDD4CF958A /* OnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17CB4289D8878A8C20969388 /* OnboardingTests.swift */; };
 		B9368FD4D5D3207421BB96CD /* tm-image.rtfd in Resources */ = {isa = PBXBuildFile; fileRef = 74E15BC2BF372FF1F27774DD /* tm-image.rtfd */; };
 		BA1EC19F6B9F64C9F2D9D824 /* EditingShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5022E10846FC0482266233 /* EditingShortcutTests.swift */; };
@@ -529,6 +530,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4C0C1A98AB2CB253C81B3503 /* textedit-marks.rtf in Resources */,
+				AFE747F145D57B57DFFC2CC4 /* tm-image-rtfd-text.rtf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

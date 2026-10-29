@@ -597,6 +597,40 @@ final class MarkdownUITests: XCTestCase {
         XCTAssertFalse(runs.last?.1.contains(.underline) == true, "\(runs)")
     }
 
+    func testRefusedRTFFileAlertsOverTheQuickPadAndOpensNoWindow() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try XCTUnwrap(Bundle(for: MarkdownUITests.self).url(forResource: "tm-image-rtfd-text", withExtension: "rtf"))
+        let file = directory.appending(path: "Picture.rtf")
+        try FileManager.default.copyItem(at: fixture, to: file)
+        let bytes = try Data(contentsOf: file)
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        app.typeText("Keep this draft")
+        app.typeKey("o", modifierFlags: .command)
+        // The refusal is itself a sheet, so this does not wait for every sheet to close as open(_:in:) does.
+        let panel = app.sheets.firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 10), app.debugDescription)
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        app.typeText(file.path)
+        app.typeKey(.return, modifierFlags: [])
+        let choose = panel.buttons["OKButton"].firstMatch
+        XCTAssertTrue(choose.waitForExistence(timeout: 5), app.debugDescription)
+        choose.click()
+        let pad = app.dialogs.firstMatch
+        let message = pad.sheets.staticTexts["This document has pictures or other content PadPad can’t keep. Open it in TextEdit instead."].firstMatch
+        XCTAssertTrue(message.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(pad.sheets.staticTexts["PadPad can’t open this document"].firstMatch.exists)
+        attach(app.screenshot(), name: "Refused RTF alert over the quick pad")
+        pad.sheets.buttons["OK"].firstMatch.click()
+        XCTAssertTrue(pad.waitForExistence(timeout: 5), "The quick pad must stay open")
+        XCTAssertFalse(app.windows.matching(NSPredicate(format: "title CONTAINS %@", "Picture.rtf")).firstMatch.exists)
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        waitForClipboard("Keep this draft")
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
     private func copyMarkdown(_ app: XCUIApplication, expecting text: String) {
         app.menuBars.menuBarItems["Edit"].click()
         app.menuItems["Copy as Markdown"].firstMatch.click()

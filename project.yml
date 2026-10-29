@@ -124,6 +124,8 @@ targets:
       - path: UITests
       - path: Tests/Fixtures/textedit-marks.rtf
         buildPhase: resources
+      - path: Tests/Fixtures/tm-image-rtfd-text.rtf
+        buildPhase: resources
     dependencies:
       - target: Pad
       - package: InkKitRTF

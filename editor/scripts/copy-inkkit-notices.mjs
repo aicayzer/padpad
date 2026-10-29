@@ -1,4 +1,4 @@
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 
 const packageDist = new URL(".", import.meta.resolve("@aicayzer/inkkit/core"));
 await mkdir("dist/licenses", { recursive: true });
@@ -13,3 +13,8 @@ await copyFile(
   "dist/HOST-THIRD-PARTY-NOTICES.md",
   "dist/licenses/HOST-THIRD-PARTY-NOTICES.md",
 );
+
+const { version } = JSON.parse(
+  await readFile(new URL("../package.json", packageDist), "utf8"),
+);
+await writeFile("dist/editor-version.json", JSON.stringify({ editorVersion: version }));

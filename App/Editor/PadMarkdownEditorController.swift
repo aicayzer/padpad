@@ -28,6 +28,7 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     var diagnosticGeneration: Int { generation }
     @ObservationIgnored weak var diagnostics: PadDiagnostics?
     @ObservationIgnored private var diagnosticsEnabled = false
+    @ObservationIgnored private var diagnosticsEpoch = 0
     private(set) var isReady = false
     private(set) var editingMode = "formatted"
     /// The loaded document's format, as InkKit's command state reports it.
@@ -94,6 +95,7 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     }
 
     func setDiagnosticsEnabled(_ enabled: Bool) {
+        if diagnosticsEnabled != enabled { diagnosticsEpoch += 1 }
         diagnosticsEnabled = enabled
         guard pageReady else { return }
         webView.evaluateJavaScript("window.editor.setDiagnosticsEnabled(\(enabled))", completionHandler: nil)
@@ -102,8 +104,14 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     func diagnosticReport() async -> [String: Any]? {
         guard diagnosticsEnabled, pageReady else { return nil }
         let expectedGeneration = generation
-        let result = try? await webView.evaluateJavaScript("window.editor.diagnosticReport()")
-        guard diagnosticsEnabled, generation == expectedGeneration, let result else { return nil }
+        let expectedEpoch = diagnosticsEpoch
+        let result = await PadDiagnosticReportRequest.collect { [weak self] finish in
+            self?.webView.evaluateJavaScript("window.editor.diagnosticReport()") { value, error in
+                finish(error == nil ? value as? [String: Any] : nil)
+            }
+        }
+        guard diagnosticsEnabled, diagnosticsEpoch == expectedEpoch,
+              generation == expectedGeneration, let result else { return nil }
         return PadDiagnosticSanitizer.report(result)
     }
 
@@ -828,5 +836,35 @@ struct PadPrintScope {
         guard current?["generation"] as? Int == generation,
               current?["documentId"] as? String == documentID,
               current?["revision"] as? Int == revision else { throw PadMarkdownEditorError.documentChanged }
+    }
+}
+
+@MainActor
+final class PadDiagnosticReportRequest {
+    private var continuation: CheckedContinuation<[String: Any]?, Never>?
+    private var timeout: Task<Void, Never>?
+
+    private init(_ continuation: CheckedContinuation<[String: Any]?, Never>) {
+        self.continuation = continuation
+    }
+
+    static func collect(timeout: Duration = .seconds(2),
+                        evaluate: (@escaping @MainActor ([String: Any]?) -> Void) -> Void) async -> [String: Any]? {
+        await withCheckedContinuation { continuation in
+            let request = PadDiagnosticReportRequest(continuation)
+            request.timeout = Task { @MainActor in
+                do { try await Task.sleep(for: timeout) } catch { return }
+                request.finish(nil)
+            }
+            evaluate { request.finish($0) }
+        }
+    }
+
+    private func finish(_ result: [String: Any]?) {
+        guard let continuation else { return }
+        self.continuation = nil
+        timeout?.cancel()
+        timeout = nil
+        continuation.resume(returning: result)
     }
 }

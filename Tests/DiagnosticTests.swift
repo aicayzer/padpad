@@ -85,6 +85,8 @@ import Testing
         let (defaults, cache, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }
         let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        defer { diagnostics.enabled = false }
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
         try PadClipboardContents(text: "Previous", html: "<p>Previous</p>").write(to: board)
@@ -92,6 +94,106 @@ import Testing
         #expect(board.string(forType: .string) == "Previous")
         #expect(board.string(forType: .html) == "<p>Previous</p>")
         #expect(diagnostics.exportError != nil)
+    }
+
+    @Test func disabledDiagnosticCopyDoesNotTouchTheClipboardOrAskEditors() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let source = DiagnosticSource()
+        diagnostics.register(source)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        try PadClipboardContents(text: "Previous", html: "<p>Previous</p>").write(to: board)
+        let count = board.changeCount
+        var writes = 0
+        await diagnostics.copyReport(to: board, writer: { _ in writes += 1; return true })
+        #expect(writes == 0)
+        #expect(source.reportRequests == 0)
+        #expect(board.changeCount == count)
+        #expect(board.string(forType: .string) == "Previous")
+        #expect(board.string(forType: .html) == "<p>Previous</p>")
+    }
+
+    @Test func reportTimeoutKeepsNativeIncidentAndIgnoresLateJavaScriptCompletion() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        let source = DiagnosticSource()
+        var lateCompletion: (@MainActor ([String: Any]?) -> Void)?
+        source.collectReport = {
+            await PadDiagnosticReportRequest.collect(timeout: .milliseconds(10)) { lateCompletion = $0 }
+        }
+        diagnostics.register(source)
+        diagnostics.record(.error, scope: source.diagnosticScope, format: .md, code: "preservation")
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(report["nativeIncident"] != nil)
+        #expect((report["editors"] as? [Any])?.isEmpty == true)
+        #expect(source.reportRequests == 1)
+        lateCompletion?(DiagnosticSource.payload())
+        #expect(!String(decoding: data, as: UTF8.self).contains(DiagnosticSource.canary))
+        diagnostics.enabled = false
+    }
+
+    @Test func oversizedCacheIsIgnoredBeforeReading() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        defaults.set(true, forKey: PadDiagnostics.preferenceKey)
+        try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{\"schemaVersion\":1}".utf8).write(to: cache)
+        let handle = try FileHandle(forWritingTo: cache)
+        try handle.truncate(atOffset: UInt64(PadDiagnostics.maximumBytes) * 1024)
+        try handle.close()
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(report["previousIncident"] == nil)
+        diagnostics.enabled = false
+    }
+
+    @Test func firstNativeIncidentKeepsItsHistoryAndFortyFollowupEvents() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        let scope = UUID()
+        for _ in 0..<240 { diagnostics.record(.edit, scope: scope, format: .md) }
+        diagnostics.record(.error, scope: scope, format: .md, code: "preservation")
+        for _ in 0..<60 { diagnostics.record(.edit, scope: scope, format: .md) }
+        diagnostics.record(.error, scope: scope, format: .md, code: "internal")
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let incident = try #require(report["nativeIncident"] as? [String: Any])
+        #expect(incident["triggerSequence"] as? Int == 241)
+        let events = try #require(incident["events"] as? [[String: Any]])
+        #expect(events.count == 200)
+        #expect(events.last?["code"] as? String == "preservation")
+        let tail = try #require(incident["tail"] as? [[String: Any]])
+        #expect(tail.count == 40)
+        #expect(tail.last?["sequence"] as? Int == 281)
+        diagnostics.enabled = false
+    }
+
+    @Test func reportUsesTheBundledEditorVersion() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let url = try #require(Bundle.main.url(forResource: "editor-version", withExtension: "json", subdirectory: "Editor"))
+        let metadata = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(report["editorVersion"] as? String == metadata["editorVersion"] as? String)
     }
 
     @Test func cancellationDuringReportLeavesClipboardUntouched() async throws {
@@ -207,10 +309,12 @@ private final class DiagnosticSource: PadDiagnosticSource {
     var toggles: [Bool] = []
     var reportRequests = 0
     var onReport: (() -> Void)?
+    var collectReport: (() async -> [String: Any]?)?
     func setDiagnosticsEnabled(_ enabled: Bool) { toggles.append(enabled) }
     func diagnosticReport() async -> [String: Any]? {
         reportRequests += 1
         onReport?()
+        if let collectReport { return await collectReport() }
         return Self.payload()
     }
     static func payload() -> [String: Any] {

@@ -130,6 +130,7 @@ struct SettingsView: View {
                 Button("Copy Diagnostic Report") {
                     Task { await settings.diagnostics.copyReport() }
                 }
+                .disabled(!diagnostics.enabled)
                 .accessibilityIdentifier("copyDiagnosticReport")
                 if let error = settings.diagnostics.exportError {
                     Text(error).foregroundStyle(Color("ErrorColor"))

@@ -560,7 +560,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/zsh;
-			shellScript = "set -euo pipefail\nexport PATH=\"$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nexport CI=true\ncd \"$SRCROOT/editor\"\npnpm install --frozen-lockfile --silent\npnpm build --logLevel warn\nDEST=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Editor\"\nmkdir -p \"$DEST\"\ncp dist/index.html \"$DEST/index.html\"\nrm -rf \"$DEST/licenses\"\ncp -R dist/licenses \"$DEST/licenses\"\n";
+			shellScript = "set -euo pipefail\nexport PATH=\"$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nexport CI=true\ncd \"$SRCROOT/editor\"\npnpm install --frozen-lockfile --silent\npnpm build --logLevel warn\nDEST=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Editor\"\nmkdir -p \"$DEST\"\ncp dist/index.html \"$DEST/index.html\"\ncp dist/editor-version.json \"$DEST/editor-version.json\"\nrm -rf \"$DEST/licenses\"\ncp -R dist/licenses \"$DEST/licenses\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

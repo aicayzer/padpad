@@ -149,7 +149,8 @@ final class PadDiagnostics {
             ? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "PadPad/diagnostic-report.json")
             : FileManager.default.temporaryDirectory.appending(path: "PadPad-diagnostics-\(UUID().uuidString)/report.json"))
         enabled = defaults.bool(forKey: Self.preferenceKey)
-        if enabled, let data = try? Data(contentsOf: self.cacheURL), data.count <= Self.maximumBytes,
+        if enabled, let size = try? self.cacheURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size <= Self.maximumBytes, let data = try? Data(contentsOf: self.cacheURL), data.count <= Self.maximumBytes,
            let raw = try? JSONSerialization.jsonObject(with: data), let report = Self.sanitizedEnvelope(raw) {
             previousReport = report
         } else if !enabled { try? FileManager.default.removeItem(at: self.cacheURL) }
@@ -200,7 +201,7 @@ final class PadDiagnostics {
             Self.logger.info("Editor \(activity.rawValue, privacy: .public) format=\(format.rawValue, privacy: .public) code=\(code.map { PadDiagnosticSanitizer.code($0) } ?? "none", privacy: .public)")
         }
         if activity == .refusal || activity == .error {
-            if !["composition", "not-ready", "stale-document", "operation-pending"].contains(PadDiagnosticSanitizer.code(code)) {
+            if nativeIncident == nil, !["composition", "not-ready", "stale-document", "operation-pending"].contains(PadDiagnosticSanitizer.code(code)) {
                 nativeIncident = ["triggerSequence": sequence, "events": events, "tail": [[String: Any]]()]
             }
             persist(envelope())
@@ -273,14 +274,26 @@ final class PadDiagnostics {
     }
 
     func copyReport(to pasteboard: NSPasteboard = .general, writer: (([NSPasteboardWriting]) -> Bool)? = nil) async {
-        guard let data = await report(), let text = String(data: data, encoding: .utf8) else { return }
+        guard enabled else { return }
+        let expectedEpoch = epoch
+        guard let data = await report(), enabled, epoch == expectedEpoch,
+              let text = String(data: data, encoding: .utf8) else { return }
         do { try PadClipboardContents(text: text).write(to: pasteboard, writer: writer) }
         catch { exportError = "Couldn’t copy the diagnostic report. Try again." }
     }
 
+    private var editorVersion: String {
+        guard let url = Bundle.main.url(forResource: "editor-version", withExtension: "json", subdirectory: "Editor"),
+              let data = try? Data(contentsOf: url),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = raw["editorVersion"] as? String, version.count <= 40,
+              version.range(of: "^[0-9]+(\\.[0-9]+)*$", options: .regularExpression) != nil else { return "unknown" }
+        return version
+    }
+
     private func envelope() -> [String: Any] {
         var result: [String: Any] = ["schemaVersion": 1, "app": "PadPad", "appVersion": Bundle.main.shortVersion,
-                                   "appBuild": Bundle.main.buildNumber, "editorVersion": "0.4.1", "enabled": enabled,
+                                   "appBuild": Bundle.main.buildNumber, "editorVersion": editorVersion, "enabled": enabled,
                                    "sessionId": sessionID.uuidString, "events": events]
         if enabled {
             if let latestEngine { result["engine"] = latestEngine }

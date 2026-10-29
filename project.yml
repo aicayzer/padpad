@@ -103,6 +103,7 @@ targets:
           DEST="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Editor"
           mkdir -p "$DEST"
           cp dist/index.html "$DEST/index.html"
+          cp dist/editor-version.json "$DEST/editor-version.json"
           rm -rf "$DEST/licenses"
           cp -R dist/licenses "$DEST/licenses"
   PadTests:

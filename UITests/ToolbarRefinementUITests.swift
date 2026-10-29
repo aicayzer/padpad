@@ -85,6 +85,66 @@ final class ToolbarRefinementUITests: XCTestCase {
         attach(app.dialogs.firstMatch.screenshot(), name: "TXT native undo and accented editing")
     }
 
+    func testEnabledFormatsPreserveDraftAndLimitFooterChoices() {
+        let app = launchPad(format: "txt", appearance: "light", enabledFormats: "(md, txt, rtf)")
+        defer { app.terminate() }
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
+        app.typeText("Keep this draft é")
+        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows["com_apple_SwiftUI_Settings_window"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.toolbars.buttons["Files"].click()
+        attach(settings.screenshot(), name: "Files settings initial default window")
+        XCTAssertTrue(settings.buttons["chooseSaveFolder"].isHittable, settings.debugDescription)
+        XCTAssertTrue(settings.staticTexts["Filename pattern"].isHittable, settings.debugDescription)
+        let markdown = settings.checkBoxes["enableFormat-md"].firstMatch
+        let plainText = settings.checkBoxes["enableFormat-txt"].firstMatch
+        let rtf = settings.checkBoxes["enableFormat-rtf"].firstMatch
+        XCTAssertTrue(markdown.waitForExistence(timeout: 5), app.debugDescription)
+        for checkbox in [markdown, plainText, rtf] where (checkbox.value as? NSNumber)?.boolValue == false {
+            checkbox.click()
+        }
+        attach(settings.screenshot(), name: "Files settings at default height on selection")
+        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes before disabling formats")
+        XCTAssertEqual((markdown.value as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((plainText.value as? NSNumber)?.boolValue, true)
+        XCTAssertEqual((rtf.value as? NSNumber)?.boolValue, true)
+        markdown.click()
+        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling Markdown")
+        attach(settings.screenshot(), name: "Default Files settings after disabling Markdown")
+        rtf.click()
+        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling RTF")
+        attach(settings.screenshot(), name: "Default Files settings with only Plain Text enabled")
+        XCTAssertFalse(plainText.isEnabled, "The last enabled format stays selected")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists)
+        XCTAssertTrue(app.staticTexts["documentFormatLabel"].exists)
+        XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        let visibility = settings.switches["showFormatToggle"].firstMatch
+        visibility.click()
+        XCTAssertFalse(app.staticTexts["documentFormatLabel"].exists)
+        visibility.click()
+        markdown.click()
+        plainText.click()
+        XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        XCTAssertFalse(markdown.isEnabled)
+        XCTAssertTrue(settings.popUpButtons["defaultFormat"].value as? String == "Markdown (.md)")
+        attach(settings.screenshot(), name: "Files settings with one enabled format and retained TXT draft")
+        let footer = app.menuButtons["documentFormat"].firstMatch
+        XCTAssertTrue(footer.exists)
+        XCTAssertEqual(footer.value as? String, "TXT")
+        footer.click()
+        XCTAssertTrue(app.menuItems["Convert to Markdown…"].exists)
+        XCTAssertFalse(app.menuItems["Plain Text"].exists)
+        XCTAssertFalse(app.menuItems["RTF"].exists)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        app.typeKey(",", modifierFlags: .command)
+        settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
+        plainText.click()
+        rtf.click()
+    }
+
     func testLongFilenameAndFormattingMenuAtEveryWidth() {
         for appearance in ["light", "dark"] {
             let app = launchPad(format: "md", appearance: appearance)
@@ -140,17 +200,26 @@ final class ToolbarRefinementUITests: XCTestCase {
         }
     }
 
-    private func launchPad(format: String, appearance: String = "dark") -> XCUIApplication {
+    private func launchPad(format: String, appearance: String = "dark", enabledFormats: String? = nil) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", format,
                                "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
                                "-quickPadWidth", "740", "-quickPadHeight", "480",
                                "-showInDock", "YES", "-menuBarItem", "NO", "-showFormatToggle", "YES", "-appearance", appearance]
+        if let enabledFormats { app.launchArguments += ["-pad.enabledFormats", enabledFormats] }
         app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         app.typeKey("n", modifierFlags: .command)
         return app
+    }
+
+    private func attachCheckboxState(_ checkboxes: [XCUIElement], name: String) {
+        let text = checkboxes.map { "\($0.identifier): value=\(String(describing: $0.value)) enabled=\($0.isEnabled) hittable=\($0.isHittable) frame=\($0.frame)" }.joined(separator: "\n")
+        let attachment = XCTAttachment(string: text)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func expectReady(_ element: XCUIElement) {

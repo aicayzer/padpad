@@ -139,6 +139,179 @@ import Testing
         #expect(fixture.document.error != nil)
     }
 
+    @Test(arguments: 1...7, [PadFormat.md, .txt, .rtf])
+    func enabledCombinationsKeepValidDefaultsAndCurrentDraft(mask: Int, initial: PadFormat) throws {
+        let fixture = try FormatSwitchFixture(format: initial)
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        let source = initial == .rtf ? Self.richJSON : "é &amp; \r\n*  Untidy source  \r\n"
+        document.text = source
+        let id = document.documentID
+        let enabled = PadFormat.allCases.enumerated().filter { mask & (1 << $0.offset) != 0 }.map(\.element)
+        for format in PadFormat.allCases where !enabled.contains(format) {
+            document.setFormatEnabled(format, enabled: false)
+        }
+        #expect(document.enabledFormats == enabled)
+        #expect(document.format == (enabled.contains(initial) ? initial : enabled[0]))
+        #expect(document.currentFormat == initial)
+        #expect(Data(document.text.utf8) == Data(source.utf8))
+        #expect(document.documentID == id)
+        #expect(document.hasFormatChoices == (enabled.count > 1 || !enabled.contains(initial)))
+        let restored = PadDocument(defaults: fixture.defaults, defaultFolder: fixture.root, presentsWindow: false)
+        #expect(restored.enabledFormats == enabled)
+        #expect(restored.format == document.format)
+        #expect(restored.currentFormat == document.format)
+        #expect(Set(fixture.defaults.stringArray(forKey: "pad.enabledFormats") ?? PadFormat.allCases.map(\.rawValue)) == Set(enabled.map(\.rawValue)))
+        for format in enabled {
+            document.format = format
+            #expect(PadDocument(defaults: fixture.defaults, presentsWindow: false).format == format)
+        }
+        for format in PadFormat.allCases where !enabled.contains(format) {
+            let prior = document.format
+            document.format = format
+            #expect(document.format == prior)
+        }
+        if let only = enabled.first, enabled.count == 1 {
+            document.setFormatEnabled(only, enabled: false)
+            #expect(document.enabledFormats == [only])
+            #expect(document.format == only)
+        }
+        document.resetQuickPadPreferences()
+        #expect(document.enabledFormats == PadFormat.allCases)
+        #expect(document.format == .md)
+        #expect(document.currentFormat == initial)
+        #expect(Data(document.text.utf8) == Data(source.utf8))
+        let reset = PadDocument(defaults: fixture.defaults, presentsWindow: false)
+        #expect(reset.enabledFormats == PadFormat.allCases)
+        #expect(reset.format == .md)
+    }
+
+    @Test(arguments: [[], ["unknown"], ["txt", "txt", "unknown"], ["rtf", "md"]])
+    func invalidStoredFormatsProduceAnOrderedNonemptySet(stored: [String]) throws {
+        let fixture = try FormatSwitchFixture(format: .rtf)
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(stored, forKey: "pad.enabledFormats")
+        let restored = PadDocument(defaults: fixture.defaults, presentsWindow: false)
+        let valid = PadFormat.allCases.filter { stored.contains($0.rawValue) }
+        #expect(restored.enabledFormats == (valid.isEmpty ? PadFormat.allCases : valid))
+        #expect(restored.enabledFormats.contains(restored.format))
+        #expect(fixture.defaults.stringArray(forKey: "pad.enabledFormats") == restored.enabledFormats.map(\.rawValue))
+    }
+
+    @Test func incorrectlyTypedStoredFormatsUseAndPersistAllFormats() throws {
+        let fixture = try FormatSwitchFixture(format: .txt)
+        defer { fixture.cleanUp() }
+        fixture.defaults.set("rtf", forKey: "pad.enabledFormats")
+        let restored = PadDocument(defaults: fixture.defaults, presentsWindow: false)
+        #expect(restored.enabledFormats == PadFormat.allCases)
+        #expect(restored.format == .txt)
+        #expect(fixture.defaults.stringArray(forKey: "pad.enabledFormats") == ["md", "txt", "rtf"])
+    }
+
+    @Test func fileWindowInitializationDoesNotWriteQuickPadPreferences() throws {
+        let fixture = try FormatSwitchFixture(format: .rtf)
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(["txt"], forKey: "pad.enabledFormats")
+        _ = PadDocument(defaults: fixture.defaults, presentsWindow: false, role: .file)
+        #expect(fixture.defaults.string(forKey: "pad.format") == "rtf")
+        #expect(fixture.defaults.stringArray(forKey: "pad.enabledFormats") == ["txt"])
+    }
+
+    @Test func disabledMenuActionDoesNotCaptureOrConvert() async throws {
+        let fixture = try FormatSwitchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "Keep this"
+        document.setFormatEnabled(.rtf, enabled: false)
+        document.editorSnapshot = { Issue.record("Disabled action must not request a snapshot"); return "stale" }
+        await document.changeFormat(to: .rtf)
+        #expect(document.currentFormat == .md)
+        #expect(document.text == "Keep this")
+        #expect(!document.isBusy)
+    }
+
+    @Test func formatDisabledDuringSnapshotCannotConvert() async throws {
+        let fixture = try FormatSwitchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.editorSnapshot = {
+            document.setFormatEnabled(.rtf, enabled: false)
+            return "Latest source"
+        }
+        document.editorConversion = { _ in Issue.record("Disabled target must not convert"); throw CocoaError(.featureUnsupported) }
+        await document.changeFormat(to: .rtf)
+        #expect(document.currentFormat == .md)
+        #expect(document.text == "Latest source")
+        #expect(!document.isBusy)
+    }
+
+    @Test func formatDisabledDuringConversionCannotReplaceDraft() async throws {
+        let alerts = AlertRecorder()
+        let fixture = try FormatSwitchFixture(alerts: alerts)
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "Keep this"
+        document.editorConversion = { _ in
+            document.setFormatEnabled(.rtf, enabled: false)
+            return PadConversion(text: Self.richJSON, changes: PadFormatLoss.changes(for: ["heading"]))
+        }
+        await document.changeFormat(to: .rtf)
+        #expect(document.currentFormat == .md)
+        #expect(document.text == "Keep this")
+        #expect(alerts.alerts.isEmpty)
+        #expect(!document.isBusy)
+    }
+
+    @Test func disabledRTFStillOpensAndUneditedSaveAsCopiesExactBytes() async throws {
+        let fixture = try FormatSwitchFixture(selectSaveFile: { directory, _ in directory.appending(path: "copy.rtf") })
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.setFormatEnabled(.rtf, enabled: false)
+        let original = fixture.root.appending(path: "letter.rtf")
+        let bytes = try RTFConverter.rtfData(from: PadRichText.document(from: Self.richJSON))
+        try bytes.write(to: original)
+        document.open(original)
+        #expect(document.currentFormat == .rtf)
+        document.save()
+        #expect(try Data(contentsOf: original) == bytes)
+        await document.saveAs(targetFormat: .rtf)
+        #expect(try Data(contentsOf: #require(document.url)) == bytes)
+        #expect(try Data(contentsOf: original) == bytes)
+        #expect(document.currentFormat == .rtf)
+        #expect(!document.enabledFormats.contains(.rtf))
+    }
+
+    @Test func folderCancellationAndFailureKeepSelectionAndWriting() async throws {
+        let fixture = try FormatSwitchFixture(choosesSaveFolder: true)
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "Keep this draft"
+        let id = document.documentID
+        fixture.selectedFolder = fixture.root
+        await document.chooseFolder()
+        #expect(document.folder == fixture.root)
+        #expect(document.folderError == nil)
+        let bookmark = fixture.defaults.data(forKey: "pad.folderBookmark")
+        #expect(bookmark != nil)
+        fixture.selectedFolder = nil
+        await document.chooseFolder()
+        #expect(document.folder == fixture.root)
+        #expect(document.folderError == nil)
+        #expect(fixture.defaults.data(forKey: "pad.folderBookmark") == bookmark)
+        fixture.selectedFolder = fixture.root.appending(path: "Unavailable", directoryHint: .isDirectory)
+        await document.chooseFolder()
+        #expect(document.folder == fixture.root)
+        #expect(document.folderError == "PadPad can’t use this folder. Choose another one.")
+        #expect(fixture.defaults.data(forKey: "pad.folderBookmark") == bookmark)
+        #expect(document.text == "Keep this draft")
+        #expect(document.documentID == id)
+        #expect(document.url == nil)
+        #expect(!document.isBusy)
+        fixture.selectedFolder = fixture.root
+        await document.chooseFolder()
+        #expect(document.folderError == nil)
+    }
+
     // MARK: RTF
 
     private static let richJSON = try! PadRichText.text(for: RichTextDocument(blocks: [

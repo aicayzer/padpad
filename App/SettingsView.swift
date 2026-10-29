@@ -21,7 +21,7 @@ struct SettingsView: View {
             Tab("About", systemImage: "info.circle") { about }
         }
         // A shared initial size keeps tab changes still; the forms remain scrollable.
-        .frame(minWidth: 460, idealWidth: 480, minHeight: 440, idealHeight: 520)
+        .frame(minWidth: 460, idealWidth: 480, minHeight: 440, idealHeight: 660)
         .tint(settings.accentColor)
         .disabled(workspace.isTransitioning)
         .background(WindowReader { window in
@@ -199,59 +199,82 @@ struct SettingsView: View {
     private var files: some View {
         @Bindable var settings = settings
         @Bindable var document = document
-        return Form {
-            Section {
-                Picker("Format", selection: $document.format) {
-                    Text("Markdown (.md)").tag(PadFormat.md)
-                    Text("Plain text (.txt)").tag(PadFormat.txt)
-                    Text("RTF (.rtf)").tag(PadFormat.rtf)
-                }
-                .tint(.primary)
-                Toggle("Save automatically", isOn: $document.saveAutomatically)
-                Picker("Clear draft", selection: $document.reusePeriod) {
-                    ForEach(PadReuse.allCases) { period in
-                        Text(period.title).tag(period)
+        return ScrollViewReader { scroll in
+            Form {
+                Section {
+                    LabeledContent("Enabled formats") {
+                        HStack(spacing: 12) {
+                            ForEach(PadFormat.allCases) { format in
+                                Toggle(format.name, isOn: Binding(
+                                    get: { document.enabledFormats.contains(format) },
+                                    set: { document.setFormatEnabled(format, enabled: $0) }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .disabled(document.enabledFormats == [format])
+                                .accessibilityIdentifier("enableFormat-\(format.rawValue)")
+                            }
+                        }
                     }
-                }
-                .tint(.primary)
-                .accessibilityIdentifier("draftLifetime")
-                Toggle("Show format switch", isOn: $settings.showFormatToggle)
-                    .accessibilityIdentifier("showFormatToggle")
-            } header: { Text("Quick pad") } footer: {
-                Text(draftExplanation)
-            }
-            Section {
-                LabeledContent("Folder") {
-                    Text(document.folder.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).help(document.folder.path)
-                    SettingsOptionsMenu(label: "Save folder options", identifier: "saveFolderOptions",
-                                        primaryTitle: "Choose Folder…",
-                                        primary: { Task { await document.chooseFolder(parent: settingsWindow) } },
-                                        secondaryTitle: "Use Downloads…",
-                                        secondaryEnabled: !document.isDefaultFolder || document.needsFolderSelection,
-                                        secondary: { Task { await document.chooseFolder(parent: settingsWindow, useDownloads: true) } })
-                        .frame(width: 18, height: 22)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("Filename").fixedSize()
-                        Spacer(minLength: 0)
-                        Text(document.namePreview)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(document.namePreview)
-                            .accessibilityLabel("Filename example: \(document.namePreview)")
+                    Picker("Default format", selection: $document.format) {
+                        ForEach(document.enabledFormats) { format in
+                            Text("\(format.name) (.\(format.rawValue))").tag(format)
+                        }
                     }
-                    PadNameField(parts: $document.nameParts).frame(height: 26)
+                    .tint(.primary)
+                    .accessibilityIdentifier("defaultFormat")
+                    Toggle("Show format switch", isOn: $settings.showFormatToggle)
+                        .accessibilityIdentifier("showFormatToggle")
+                } header: { Text("Quick pad format") } footer: {
+                    Text("Choose at least one format. The default applies to new drafts. Existing writing keeps its format.")
                 }
-            } header: { Text("Saving") } footer: {
-                Text(document.needsFolderSelection
-                     ? "Choose a folder on your first save, or choose one here. Opened files stay in their own folder."
-                     : "New quick-pad files save here. Opened files stay in their own folder.")
-                if let error = document.folderError { Text(error).foregroundStyle(Color("ErrorColor")) }
+                .id("quickPadFormat")
+                Section {
+                    Toggle("Save automatically", isOn: $document.saveAutomatically)
+                    Picker("Clear draft", selection: $document.reusePeriod) {
+                        ForEach(PadReuse.allCases) { period in
+                            Text(period.title).tag(period)
+                        }
+                    }
+                    .tint(.primary)
+                    .accessibilityIdentifier("draftLifetime")
+                } header: { Text("Drafts") } footer: {
+                    Text(draftExplanation)
+                }
+                Section {
+                    LabeledContent("Folder") {
+                        Text(document.folder.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).help(document.folder.path)
+                        Button("Choose…") { Task { await document.chooseFolder(parent: settingsWindow) } }
+                            .accessibilityIdentifier("chooseSaveFolder")
+                            .accessibilityLabel("Choose save folder")
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text("Filename pattern").fixedSize()
+                            Spacer(minLength: 0)
+                            Text(document.namePreview)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(document.namePreview)
+                                .accessibilityLabel("Filename example: \(document.namePreview)")
+                        }
+                        PadNameField(parts: $document.nameParts).frame(height: 26)
+                    }
+                } header: { Text("Storage") } footer: {
+                    Text(document.needsFolderSelection
+                         ? "Choose a folder on your first save, or choose one here. Opened files stay in their own folder."
+                         : "New quick-pad files save here. Opened files stay in their own folder.")
+                    if let error = document.folderError { Text(error).foregroundStyle(Color("ErrorColor")) }
+                }
             }
-        }.formStyle(.grouped)
+            .formStyle(.grouped)
+            .onAppear {
+                // The native filename field otherwise takes focus and scrolls the format controls out of view.
+                settingsWindow?.makeFirstResponder(nil)
+                scroll.scrollTo("quickPadFormat", anchor: .top)
+            }
+        }
     }
 
     private var draftExplanation: String {

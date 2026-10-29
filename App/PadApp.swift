@@ -8,8 +8,8 @@ struct PadApp: App {
         Settings {
             SettingsView().environment(delegate.settings).environment(delegate.document).environment(delegate.workspace)
         }
-        .defaultSize(width: 480, height: 520)
-        .windowResizability(.contentSize)
+        .defaultSize(width: 480, height: 660)
+        .windowResizability(.contentMinSize)
         .commands { AppCommands(workspace: delegate.workspace) }
 
         MenuBarExtra(isInserted: Binding(get: { !AppDelegate.isTestHost && delegate.settings.menuBarItem }, set: { delegate.settings.menuBarItem = $0 })) {

@@ -55,12 +55,28 @@ final class PadDocument {
             panel?.level = isQuickPad && floating ? .floating : .normal
         }
     }
+    private var defaultFormat: PadFormat
     var format: PadFormat {
-        didSet {
-            defaults.set(format.rawValue, forKey: Self.formatKey)
+        get { defaultFormat }
+        set {
+            guard enabledFormats.contains(newValue) else { return }
+            defaultFormat = newValue
+            defaults.set(newValue.rawValue, forKey: Self.formatKey)
             updateTitle()
         }
     }
+    private(set) var enabledFormats: [PadFormat]
+
+    func setFormatEnabled(_ candidate: PadFormat, enabled: Bool) {
+        var selected = Set(enabledFormats)
+        if enabled { selected.insert(candidate) } else { selected.remove(candidate) }
+        guard !selected.isEmpty else { return }
+        enabledFormats = PadFormat.allCases.filter { selected.contains($0) }
+        defaults.set(enabledFormats.map(\.rawValue), forKey: Self.enabledFormatsKey)
+        if !selected.contains(format), let first = enabledFormats.first { format = first }
+    }
+
+    var hasFormatChoices: Bool { enabledFormats.count > 1 || !enabledFormats.contains(currentFormat) }
     var saveAutomatically: Bool {
         didSet { defaults.set(saveAutomatically, forKey: Self.autoSaveKey) }
     }
@@ -145,6 +161,7 @@ final class PadDocument {
 
     private static let floatingKey = "pad.floating"
     private static let formatKey = "pad.format"
+    private static let enabledFormatsKey = "pad.enabledFormats"
     private static let folderBookmarkKey = "pad.folderBookmark"
     private static let autoSaveKey = "pad.saveAutomatically"
     private static let reuseKey = "pad.reusePeriod"
@@ -192,8 +209,20 @@ final class PadDocument {
         let defaultFloating = true
         #endif
         floating = defaults.object(forKey: Self.floatingKey) == nil ? defaultFloating : defaults.bool(forKey: Self.floatingKey)
-        format = defaults.string(forKey: Self.formatKey).flatMap(PadFormat.init(rawValue:)) ?? .md
-        scratchFormat = defaults.string(forKey: Self.formatKey).flatMap(PadFormat.init(rawValue:)) ?? .md
+        let storedFormats = defaults.stringArray(forKey: Self.enabledFormatsKey)
+        let selected = PadFormat.allCases.filter { storedFormats?.contains($0.rawValue) ?? true }
+        let enabled = selected.isEmpty ? PadFormat.allCases : selected
+        enabledFormats = enabled
+        let storedDefault = defaults.string(forKey: Self.formatKey).flatMap(PadFormat.init(rawValue:)) ?? .md
+        let initialFormat = enabled.contains(storedDefault) ? storedDefault : enabled[0]
+        defaultFormat = initialFormat
+        scratchFormat = initialFormat
+        if role == .quickPad, defaults.object(forKey: Self.enabledFormatsKey) != nil {
+            if storedFormats != enabled.map(\.rawValue) {
+                defaults.set(enabled.map(\.rawValue), forKey: Self.enabledFormatsKey)
+            }
+            if initialFormat != storedDefault { defaults.set(initialFormat.rawValue, forKey: Self.formatKey) }
+        }
         saveAutomatically = role == .quickPad && (defaults.object(forKey: Self.autoSaveKey) == nil ? true : defaults.bool(forKey: Self.autoSaveKey))
         reusePeriod = PadReuse(rawValue: defaults.object(forKey: Self.reuseKey) as? Int ?? 15) ?? .fifteenMinutes
         nameParts = defaults.data(forKey: Self.namePartsKey)
@@ -218,7 +247,6 @@ final class PadDocument {
     var canShare: Bool { !text.isEmpty && !isBusy }
     var isBusy: Bool { operation != nil || alert != nil }
     var isVisible: Bool { panel?.isVisible == true }
-    var isDefaultFolder: Bool { folder.standardizedFileURL == Self.downloadsFolder.standardizedFileURL }
     var needsFolderSelection: Bool { !hasSaveFolderAccess }
 
     private var hasSaveFolderAccess: Bool {
@@ -485,12 +513,18 @@ final class PadDocument {
         return true
     }
 
-    func chooseFolder(parent: NSWindow? = nil, useDownloads: Bool = false) async {
+    func chooseFolder(parent: NSWindow? = nil) async {
         guard !isBusy else { return }
         operation = .filePanel
         defer { operation = nil }
-        let picker = saveFolderPicker(directory: useDownloads ? Self.downloadsFolder : folder)
-        guard await present(picker, parent: parent ?? dialogParent) == .OK, let chosen = picker.url else { return }
+        let chosen: URL?
+        if let selectSaveFolder {
+            chosen = selectSaveFolder(folder)
+        } else {
+            let picker = saveFolderPicker(directory: folder)
+            chosen = await present(picker, parent: parent ?? dialogParent) == .OK ? picker.url : nil
+        }
+        guard let chosen else { return }
         do {
             try rememberSaveFolder(chosen)
             folderError = nil
@@ -512,6 +546,9 @@ final class PadDocument {
     private func rememberSaveFolder(_ chosen: URL) throws {
         let accessing = chosen.startAccessingSecurityScopedResource()
         do {
+            guard try chosen.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
+                throw PadError.missingFolder
+            }
             let data = try chosen.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             folderScope?.stopAccessingSecurityScopedResource()
             defaults.set(data, forKey: Self.folderBookmarkKey)
@@ -810,13 +847,14 @@ final class PadDocument {
     /// Switches an unsaved quick-pad draft to another format. Markdown and plain text keep the exact source;
     /// RTF converts, and a conversion that loses something changes nothing until the person confirms it.
     func changeFormat(to target: PadFormat) async {
-        guard isQuickPad, url == nil, !isBusy, !onboarding.isPresented, target != currentFormat else { return }
+        guard isQuickPad, url == nil, !isBusy, !onboarding.isPresented,
+              enabledFormats.contains(target), target != currentFormat else { return }
         operation = .transition
         defer { operation = nil }
-        guard await captureLatestEditor() else { return }
+        guard await captureLatestEditor(), enabledFormats.contains(target) else { return }
         let id = documentID
-        guard let conversion = await confirmedConversion(of: text, to: target, savingCopy: false),
-              documentID == id else {
+        guard let conversion = await confirmedConversion(of: text, to: target, savingCopy: false, requiresEnabledFormat: true),
+              documentID == id, enabledFormats.contains(target) else {
             show()
             panel?.resumeEditor()
             return
@@ -858,7 +896,8 @@ final class PadDocument {
     }
 
     /// The converted text, or nil when the conversion failed or the person kept the original.
-    private func confirmedConversion(of content: String, to target: PadFormat, savingCopy: Bool) async -> PadConversion? {
+    private func confirmedConversion(of content: String, to target: PadFormat, savingCopy: Bool,
+                                     requiresEnabledFormat: Bool = false) async -> PadConversion? {
         let id = documentID
         let conversion: PadConversion
         do {
@@ -867,7 +906,7 @@ final class PadDocument {
             report(error, during: .convert)
             return nil
         }
-        guard documentID == id else { return nil }
+        guard documentID == id, !requiresEnabledFormat || enabledFormats.contains(target) else { return nil }
         if conversion.changes.isEmpty { return conversion }
         let alert = PadAlert.conversion(to: target, savingCopy: savingCopy, changes: conversion.changes)
         guard await confirm(alert), documentID == id else { return nil }
@@ -1151,6 +1190,8 @@ final class PadDocument {
     func resetQuickPadPreferences() {
         floating = true
         // The default applies to future drafts; the current draft keeps its format and text.
+        enabledFormats = PadFormat.allCases
+        defaults.set(enabledFormats.map(\.rawValue), forKey: Self.enabledFormatsKey)
         format = .md
         saveAutomatically = false
         reusePeriod = .fifteenMinutes

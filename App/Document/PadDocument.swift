@@ -815,9 +815,9 @@ final class PadDocument {
         var observedBytes: Data?
         do {
             if let url {
-                let bytes = try Data(contentsOf: url)
-                observedBytes = bytes
-                guard bytes == baseline else { throw PadError.changed }
+                let bytesOnDisk = try Data(contentsOf: url)
+                observedBytes = bytesOnDisk
+                guard bytesOnDisk == baseline else { throw PadError.changed }
                 // Writing RTF restyles the whole file, so an unedited RTF file is never rewritten.
                 if currentFormat == .rtf, !isDirty {
                     notice = "Saved"

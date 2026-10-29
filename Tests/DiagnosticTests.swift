@@ -286,6 +286,26 @@ import Testing
         #expect((report["editors"] as? [Any])?.count == 4)
     }
 
+    @Test(arguments: ["27.0.1", "PRIVATE-OS-DESCRIPTION", "27.0.1.2", "27000.0.1", "27.0.1\r\n"])
+    func reportsUseNumericOperatingSystemVersionsAndRevalidateCachedMetadata(cachedVersion: String) async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        defaults.set(true, forKey: PadDiagnostics.preferenceKey)
+        try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "osVersion": cachedVersion]).write(to: cache)
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        #expect(report["osVersion"] as? String == "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)")
+        let previous = try #require(report["previousIncident"] as? [String: Any])
+        #expect(previous["osVersion"] as? String == (cachedVersion == "27.0.1" ? cachedVersion : nil))
+        diagnostics.enabled = false
+    }
+
     @Test func cachedReportIsSanitizedAgainOnRelaunch() async throws {
         let (defaults, cache, suite) = fixture()
         defer {

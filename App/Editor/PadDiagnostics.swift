@@ -291,9 +291,16 @@ final class PadDiagnostics {
         return version
     }
 
+    private var osVersion: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        let components = [version.majorVersion, version.minorVersion, version.patchVersion]
+        guard components.allSatisfy({ (0...9_999).contains($0) }) else { return "unknown" }
+        return components.map(String.init).joined(separator: ".")
+    }
+
     private func envelope() -> [String: Any] {
         var result: [String: Any] = ["schemaVersion": 1, "app": "PadPad", "appVersion": Bundle.main.shortVersion,
-                                   "appBuild": Bundle.main.buildNumber, "editorVersion": editorVersion, "enabled": enabled,
+                                   "appBuild": Bundle.main.buildNumber, "editorVersion": editorVersion, "osVersion": osVersion, "enabled": enabled,
                                    "sessionId": sessionID.uuidString, "events": events]
         if enabled {
             if let latestEngine { result["engine"] = latestEngine }
@@ -356,6 +363,8 @@ final class PadDiagnostics {
             if let value = input[key] as? String, value.count <= 40,
                value.range(of: "^[0-9]+(\\.[0-9]+)*$", options: .regularExpression) != nil { clean[key] = value }
         }
+        if let version = input["osVersion"] as? String, version.count <= 14,
+           version.range(of: "\\A[0-9]{1,4}(\\.[0-9]{1,4}){2}\\z", options: .regularExpression) != nil { clean["osVersion"] = version }
         if let session = input["sessionId"] as? String, UUID(uuidString: session) != nil { clean["sessionId"] = session }
         if let incident = input["engine"] as? [String: Any],
            let report = incident["report"].flatMap(PadDiagnosticSanitizer.report),

@@ -2,7 +2,7 @@
 
 The app bootstrap consumes `@aicayzer/inkkit` and bundles its JavaScript and CSS into one offline HTML file. The native app owns document identity, generation, storage, appearance, and keyboard bindings. InkKit owns editing, preservation, tables, and clipboard conversion.
 
-The editor build copies Inkkit's license, notice and bundled dependency notices into `dist/licenses/`, together with Vite's generated notices for the host's bundled dependencies. The app build includes that directory beside `Editor/index.html`. Rebuild the page and notices together when updating Inkkit.
+The editor build copies Inkkit's license, notice and bundled dependency notices into `dist/licenses/`, together with Vite's generated notices for the host's bundled dependencies. The app build includes that directory beside `Editor/index.html` and `editor-version.json`, which records the bundled package version for diagnostic reports. Rebuild the page and notices together when updating Inkkit.
 
 ## Documents and snapshots
 
@@ -38,4 +38,6 @@ Diagnostics are off by default. The native General settings preference calls `se
 
 `diagnosticReport()` reads metadata independently of document snapshots, including during composition, pending work, or a refused edit. The native side validates schema version 1 and copies only known enums, booleans, bounded numbers, safe presentation fields, and random diagnostic IDs. It never exports source, filenames, paths, document IDs, input characters, link destinations, or arbitrary error messages. Refusals retain the structured error code and safe preservation reason.
 
-The native recorder keeps at most 200 activities. It retains one bounded report file for relaunch, and identifies windows with random local scopes. Copy Diagnostic Report explicitly puts JSON on the native pasteboard for manual sharing. Report generation does not save or rewrite the document, including unedited RTF files.
+The native report includes the app version and build, bundled editor version, and macOS version as bounded numeric components. It contains no hardware identifiers or arbitrary OS description strings. Cached reports are validated again on launch.
+
+The native recorder keeps at most 200 activities. It retains one bounded report file for relaunch, and identifies windows with random local scopes. Report requests time out after two seconds and retain native history if the editor is unavailable. Copy Diagnostic Report explicitly puts JSON on the native pasteboard for manual sharing while recording is enabled; failed copies preserve the previous clipboard contents. Report generation does not save or rewrite the document, including unedited RTF files.

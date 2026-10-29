@@ -1,4 +1,5 @@
 import AppKit
+import InkKitRTF
 
 /// A message for the pill at the bottom left of the editor card.
 struct PadMessage: Equatable {
@@ -11,12 +12,15 @@ struct PadAlert: Equatable {
     /// The next step the alert offers. Each one runs an existing command.
     enum Action: Equatable {
         case saveAs, openSettings, chooseFile
+        /// Confirms a format conversion that loses something.
+        case convert
 
         var title: String {
             switch self {
             case .saveAs: "Save As…"
             case .openSettings: "Open Settings"
             case .chooseFile: "Choose File…"
+            case .convert: "Convert"
             }
         }
     }
@@ -62,6 +66,8 @@ enum PadProblem: Equatable {
     /// What PadPad was doing. The same error can need a different next step.
     enum Context: Equatable {
         case open, read, save, saveAs, rename, share, print, copy, editor
+        /// Converting a draft to another format.
+        case convert
         /// Reading the latest text from the editor before another action.
         case snapshot
         /// Making a file name from the naming format in Settings.
@@ -78,9 +84,12 @@ enum PadProblem: Equatable {
         case .snapshot: self = .message(Self.snapshotFailed); return
         case .editor: self = .message(Self.editorFailed); return
         case .copy: self = .message(Self.copyFailed); return
+        case .convert: self = .message(Self.convertFailed); return
         default: break
         }
-        if let error = error as? PadError {
+        if let error = error as? RTFConversionError, let problem = Self.classify(error, during: context) {
+            self = problem
+        } else if let error = error as? PadError {
             self = Self.classify(error, during: context)
         } else if let error = error as? CocoaError, let problem = Self.classify(error.code, during: context) {
             self = problem
@@ -103,10 +112,10 @@ enum PadProblem: Equatable {
         case .emptyShare: return .message(PadMessage(text: "Write something before sharing."))
         case .unsupported where context == .open:
             return .alert(PadAlert(title: "PadPad can’t open this type of file",
-                                   message: "Choose a Markdown (.md) or plain text (.txt) file.", action: .chooseFile))
+                                   message: "Choose a Markdown (.md), plain text (.txt), or RTF (.rtf) file.", action: .chooseFile))
         case .unsupported:
             return .alert(PadAlert(title: "PadPad can’t save this type of file",
-                                   message: "Save it as a Markdown (.md) or plain text (.txt) file.", action: .saveAs))
+                                   message: "Save it as a Markdown (.md), plain text (.txt), or RTF (.rtf) file.", action: .saveAs))
         case .encoding:
             return .alert(PadAlert(title: "This file’s text encoding isn’t supported",
                                    message: keepsText ? keepCopy : "PadPad opens files saved as UTF-8 text.",
@@ -120,6 +129,28 @@ enum PadProblem: Equatable {
         case .renamePermission:
             return .alert(PadAlert(title: "PadPad doesn’t have access to this folder",
                                    message: "To rename the file, save a copy with the new name.", action: .saveAs))
+        }
+    }
+
+    /// Reading an RTF file refuses content PadPad can't keep, so the file never opens with something missing.
+    /// Writing failures use the ordinary save failure.
+    private static func classify(_ error: RTFConversionError, during context: Context) -> PadProblem? {
+        guard context == .open || context == .read else { return nil }
+        let changed = context == .read
+        switch error {
+        case .unsupportedContent:
+            return .alert(PadAlert(title: changed ? "PadPad can’t reload this document" : "PadPad can’t open this document",
+                                   message: changed
+                                       ? "It was changed elsewhere and now has pictures or other content PadPad can’t keep. Open it in TextEdit instead."
+                                       : "This document has pictures or other content PadPad can’t keep. Open it in TextEdit instead."))
+        case .notRTF:
+            return .alert(PadAlert(title: changed ? "This file is no longer an RTF document" : "This file isn’t an RTF document",
+                                   message: "It has the .rtf extension but contains another format. Open it in TextEdit instead."))
+        case .unreadable:
+            return .alert(PadAlert(title: "This RTF document is damaged",
+                                   message: "PadPad can’t read it. Try opening it in TextEdit."))
+        case .invalidDocument, .writeFailed:
+            return nil
         }
     }
 
@@ -163,6 +194,7 @@ enum PadProblem: Equatable {
         case .rename:
             .message(PadMessage(text: "Couldn’t rename this file.", hint: "Try another name."))
         case .copy: .message(copyFailed)
+        case .convert: .message(convertFailed)
         case .snapshot: .message(snapshotFailed)
         case .editor: .message(editorFailed)
         }
@@ -173,6 +205,7 @@ enum PadProblem: Equatable {
     private static let snapshotFailed = PadMessage(text: "Couldn’t get your latest text.", hint: "Try again.")
     private static let editorFailed = PadMarkdownEditorError.editorFailed
     private static let copyFailed = PadMessage(text: "Couldn’t copy your text.", hint: "Try again.")
+    private static let convertFailed = PadMessage(text: "Couldn’t change the format.", hint: "Try again.")
 }
 
 extension PadMarkdownEditorError {

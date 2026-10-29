@@ -75,6 +75,16 @@ struct PadMarkdownToolbar: View {
         Group {
             formatToggle("Bold", command: .bold)
             formatToggle("Italic", command: .italic)
+            formatToggle("Underline", command: .underline)
+        }
+    }
+
+    private var alignmentCommands: some View {
+        Group {
+            formatToggle("Align Left", command: .alignLeft)
+            formatToggle("Center", command: .alignCenter)
+            formatToggle("Justify", command: .alignJustify)
+            formatToggle("Align Right", command: .alignRight)
         }
     }
 
@@ -97,15 +107,23 @@ struct PadMarkdownToolbar: View {
         .accessibilityAddTraits(active(.link) ? .isSelected : [])
     }
 
+    /// The commands the loaded format supports, as InkKit's command state reports it: RTF has
+    /// alignment, and no headings, quotes or code blocks. Availability enables each item.
     var menuCommands: some View {
         Group {
-            Menu("Headings") { headingCommands }
+            if editor.documentFormat == .rtf {
+                Menu("Alignment") { alignmentCommands }
+            } else {
+                Menu("Headings") { headingCommands }
+            }
             Menu("Text style") { styleCommands }
             Divider()
             Button("Link") { editor.presentLink() }.disabled(editor.formatAvailability["link"] != true)
             formatToggle("Inline code", command: .code)
-            formatToggle("Code block", command: .codeBlock)
-            formatToggle("Quote", command: .quote)
+            if editor.documentFormat != .rtf {
+                formatToggle("Code block", command: .codeBlock)
+                formatToggle("Quote", command: .quote)
+            }
             Divider()
             Menu("Lists") { listCommands }
             Menu("Table") {

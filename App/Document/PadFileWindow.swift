@@ -86,7 +86,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
             guard !self.pendingEditorInput.isComposing else { return }
             guard !self.files.startsInReadingMode || self.firstResponder !== self else { return }
             let awaitingEditor = self.firstResponder === self.pendingEditorInput || self.firstResponder === self
-            if self.files.currentFormat == .md {
+            if self.files.currentFormat.usesEditor {
                 guard let editor = self.files.markdownEditor else { return }
                 // Replacing the document can temporarily buffer input while DOM focus catches up.
                 guard awaitingEditor || editor.ownsFirstResponder else { return }
@@ -100,7 +100,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
     }
 
     func prepareMarkdownSnapshot() {
-        guard files.currentFormat == .md, let editor = files.markdownEditor else { return }
+        guard files.currentFormat.usesEditor, let editor = files.markdownEditor else { return }
         editor.hasExternalMarkedText = { [weak self] in self?.pendingEditorInput.isComposing == true }
         guard !pendingEditorInput.isComposing, pendingEditorInput.eventCount > 0 else { return }
         editor.enqueueInputs(pendingEditorInput.takeInputs())
@@ -135,7 +135,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
     }
 
     override func sendEvent(_ event: NSEvent) {
-        if !files.onboarding.isPresented, files.currentFormat == .md, firstResponder !== pendingEditorInput,
+        if !files.onboarding.isPresented, files.currentFormat.usesEditor, firstResponder !== pendingEditorInput,
            files.markdownEditor?.capturePendingInput(event) == true { return }
         super.sendEvent(event)
         files.acceptMarkdownContentClick(event)

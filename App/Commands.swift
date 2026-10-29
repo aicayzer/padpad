@@ -56,7 +56,7 @@ struct AppCommands: Commands {
         }
         CommandGroup(after: .pasteboard) {
             Button("Find and Replace…") {
-                if document.currentFormat == .md { document.markdownEditor?.showingFind = true }
+                if document.currentFormat.usesEditor { document.markdownEditor?.showingFind = true }
                 else {
                     let item = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
                     item.tag = NSTextFinder.Action.showFindInterface.rawValue
@@ -73,11 +73,14 @@ struct AppCommands: Commands {
                 .disabled(!canEdit || document.currentFormat != .md)
         }
         CommandMenu("Format") {
-            if document.currentFormat == .md, let editor = document.markdownEditor {
-                Toggle("Markdown Source", isOn: Binding(get: { editor.editingMode == "source" },
-                    set: { editor.setEditingMode($0 ? "source" : "formatted") }))
-                    .disabled(!canEdit || !editor.canPerformMenuCommands)
-                Divider()
+            if document.currentFormat.usesEditor, let editor = document.markdownEditor {
+                // RTF has no source mode.
+                if editor.documentFormat == .md {
+                    Toggle("Markdown Source", isOn: Binding(get: { editor.editingMode == "source" },
+                        set: { editor.setEditingMode($0 ? "source" : "formatted") }))
+                        .disabled(!canEdit || !editor.canPerformMenuCommands)
+                    Divider()
+                }
                 PadMarkdownToolbar(editor: editor).menuCommands
                     .disabled(!canEdit || !editor.canPerformMenuCommands)
             }

@@ -1,9 +1,11 @@
 import AppKit
+import InkKitRTF
 import Observation
 import WebKit
 
 enum PadMarkdownFormatCommand: String {
-    case paragraph, heading, bold, italic, code, codeBlock, quote, bulletList, orderedList, link
+    case paragraph, heading, bold, italic, underline, code, codeBlock, quote, bulletList, orderedList, link
+    case alignLeft, alignCenter, alignRight, alignJustify
 }
 
 enum PadMarkdownEditorError: Error {
@@ -24,6 +26,8 @@ struct PadMarkdownEditorFeedback: Equatable {
 final class PadMarkdownEditorController: NSObject {
     private(set) var isReady = false
     private(set) var editingMode = "formatted"
+    /// The loaded document's format, as InkKit's command state reports it.
+    private(set) var documentFormat: PadFormat = .md
     private(set) var canUndo = false
     private(set) var canRedo = false
     private(set) var canReplace = false
@@ -61,7 +65,8 @@ final class PadMarkdownEditorController: NSObject {
     @ObservationIgnored private var readingWidth: Double?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var documentID: UUID?
-    @ObservationIgnored private var pendingLoad: (markdown: String, reload: Bool)?
+    @ObservationIgnored private var pendingLoad: (source: String, format: PadFormat, reload: Bool)?
+    @ObservationIgnored private var loadedFormat: PadFormat?
     @ObservationIgnored private var failure: (any Error)?
     @ObservationIgnored private var loadTask: Task<Void, any Error>?
     @ObservationIgnored private var pendingEvents: [MarkdownInputBuffer.Input] = []
@@ -121,15 +126,16 @@ final class PadMarkdownEditorController: NSObject {
         webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
-    func load(_ markdown: String, documentID: UUID) {
-        replace(markdown, documentID: documentID, reload: false)
+    /// Loads Markdown source, or the stored JSON of an RTF document (see `PadRichText`).
+    func load(_ source: String, format: PadFormat = .md, documentID: UUID) {
+        replace(source, format: format, documentID: documentID, reload: false)
     }
 
-    func reload(_ markdown: String, documentID: UUID) {
-        replace(markdown, documentID: documentID, reload: true)
+    func reload(_ source: String, format: PadFormat = .md, documentID: UUID) {
+        replace(source, format: format, documentID: documentID, reload: true)
     }
 
-    private func replace(_ markdown: String, documentID: UUID, reload: Bool) {
+    private func replace(_ source: String, format: PadFormat, documentID: UUID, reload: Bool) {
         generation += 1
         self.documentID = documentID
         activeMarks = []
@@ -146,7 +152,7 @@ final class PadMarkdownEditorController: NSObject {
         if ownsFirstResponder { webView.window?.makeFirstResponder(inputBuffer) }
         isReady = false
         hasFocusedDocument = false
-        pendingLoad = (markdown, reload)
+        pendingLoad = (source, format, reload)
         if pageReady { applyPendingLoad() }
     }
 
@@ -154,14 +160,20 @@ final class PadMarkdownEditorController: NSObject {
         guard let pendingLoad else { return }
         self.pendingLoad = nil
         let expectedGeneration = generation
-        let function = pendingLoad.reload ? "reload" : "load"
-        let script = "window.editor.\(function)(\(json(pendingLoad.markdown)), \(expectedGeneration), \(json(documentID?.uuidString ?? "")))"
+        // Plain text drafts keep their source in the editor as Markdown, ready for a switch back.
+        let format = pendingLoad.format == .rtf ? PadFormat.rtf : .md
+        // A reload keeps the selection within one format; a different format is a new load.
+        let function = pendingLoad.reload && loadedFormat == format ? "reload" : "load"
+        let source = format == .rtf ? PadRichText.json(for: pendingLoad.source) : pendingLoad.source
+        let script = "window.editor.\(function)(\(json(source)), \(expectedGeneration), \(json(documentID?.uuidString ?? "")), \(json(format.rawValue)))"
+        loadedFormat = nil
         loadTask = Task { @MainActor [weak self] in
             guard let self else { throw PadMarkdownEditorError.unavailable }
             do {
                 guard self.generation == expectedGeneration else { throw PadMarkdownEditorError.documentChanged }
                 _ = try await self.webView.evaluateJavaScript(script)
                 guard self.generation == expectedGeneration else { throw PadMarkdownEditorError.documentChanged }
+                self.loadedFormat = format
                 self.failure = nil
                 self.isReady = true
                 self.onReady()
@@ -174,6 +186,7 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     /// A nil result means the loaded source is unchanged, preserving its original formatting.
+    /// An RTF snapshot returns the document's stored JSON (see `PadRichText`).
     func snapshot() async throws -> String? {
         let expectedGeneration = generation
         let deadline = ContinuousClock.now + .seconds(15)
@@ -211,10 +224,43 @@ final class PadMarkdownEditorController: NSObject {
         }
         guard payload["generation"] as? Int == expectedGeneration,
               payload["documentId"] as? String == documentID?.uuidString,
-              let markdown = payload["text"] as? String,
-              payload["format"] as? String == "md", payload["revision"] is Int,
+              let format = loadedFormat, payload["format"] as? String == format.rawValue,
+              payload["revision"] is Int,
               let dirty = payload["dirty"] as? Bool else { throw PadMarkdownEditorError.invalidResponse }
-        return dirty ? markdown : nil
+        guard let content = Self.content(of: payload, format: format) else { throw PadMarkdownEditorError.invalidResponse }
+        return dirty ? content : nil
+    }
+
+    /// Markdown carries its `text`; RTF carries its `document` as JSON text, stored in canonical form.
+    private static func content(of payload: [String: Any], format: PadFormat) -> String? {
+        if format == .rtf {
+            guard payload["text"] == nil, let document = payload["document"] as? String else { return nil }
+            return try? PadRichText.canonicalText(json: document)
+        }
+        guard payload["document"] == nil else { return nil }
+        return payload["text"] as? String
+    }
+
+    /// Converts the current document with InkKit, for a switch or Save As between Markdown and RTF.
+    /// The editor is unchanged; the caller loads the result as a new generation once the person confirms.
+    func convert(to target: PadFormat) async throws -> PadConversion {
+        let expectedGeneration = generation
+        _ = try await snapshot()
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        let result = try await webView.evaluateJavaScript("window.editor.convert(\(json(target.rawValue)), \(expectedGeneration))")
+        guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
+        guard let payload = result as? [String: Any] else { throw PadMarkdownEditorError.invalidResponse }
+        if let code = payload["snapshotError"] as? String {
+            throw PadMarkdownEditorError.snapshotRejected(code: code, message: payload["message"] as? String ?? "")
+        }
+        guard payload["format"] as? String == target.rawValue,
+              let text = Self.content(of: payload, format: target),
+              let lost = payload["lost"] as? [[String: Any]] else { throw PadMarkdownEditorError.invalidResponse }
+        let codes = try lost.map { entry in
+            guard let code = entry["code"] as? String else { throw PadMarkdownEditorError.invalidResponse }
+            return code
+        }
+        return PadConversion(text: text, changes: PadFormatLoss.changes(for: codes))
     }
 
     func clipboardSnapshot() async throws -> PadClipboardContents {
@@ -410,7 +456,7 @@ final class PadMarkdownEditorController: NSObject {
         guard let payload = result as? [String: Any],
               payload["generation"] as? Int == expectedGeneration,
               payload["documentId"] as? String == documentID?.uuidString,
-              let revision = payload["revision"] as? Int, payload["format"] as? String == "md",
+              let revision = payload["revision"] as? Int, payload["format"] as? String == loadedFormat?.rawValue,
               let html = payload["html"] as? String, payload["styles"] is String,
               payload["assetCount"] is Int, payload["warnings"] is [Any] else {
             throw PadMarkdownEditorError.invalidResponse
@@ -522,7 +568,7 @@ final class PadMarkdownEditorController: NSObject {
             applyAccent()
             applyReadingWidth()
             call("setKeymap", json([
-                "bold": ["Mod-b"], "italic": ["Mod-i"], "code": ["Mod-e"],
+                "bold": ["Mod-b"], "italic": ["Mod-i"], "underline": ["Mod-u"], "code": ["Mod-e"],
                 "heading1": ["Mod-Alt-1"], "heading2": ["Mod-Alt-2"],
                 "heading3": ["Mod-Alt-3"], "paragraph": ["Mod-Alt-0"],
                 "quote": ["Mod-Shift-b"], "bulletList": ["Mod-Alt-8"],
@@ -531,15 +577,17 @@ final class PadMarkdownEditorController: NSObject {
             applyPendingLoad()
         case "changed":
             guard let receivedGeneration = message["generation"] as? Int, receivedGeneration == generation,
-                  let markdown = message["markdown"] as? String, let documentID,
-                  message["documentId"] as? String == documentID.uuidString else { return }
-            onChanged(markdown, documentID)
+                  let documentID, message["documentId"] as? String == documentID.uuidString,
+                  let format = loadedFormat, message["format"] as? String == format.rawValue,
+                  let content = Self.content(of: message, format: format) else { return }
+            onChanged(content, documentID)
         case "commands":
             guard message["generation"] as? Int == generation,
                   message["documentId"] as? String == documentID?.uuidString,
                   let commands = message["commands"] as? [String: Any],
                   let mode = message["mode"] as? String else { return }
             editingMode = mode
+            if let format = (message["format"] as? String).flatMap(PadFormat.init(rawValue:)) { documentFormat = format }
             canUndo = commands["undo"] as? Bool ?? false
             canRedo = commands["redo"] as? Bool ?? false
             canReplace = commands["replace"] as? Bool ?? false
@@ -553,6 +601,7 @@ final class PadMarkdownEditorController: NSObject {
                 if type == "heading", let level = block["level"] as? Int { active.insert("heading\(level)") }
             }
             if caret["quoted"] as? Bool == true { active.insert("quote") }
+            if let align = caret["align"] as? String { active.insert("align" + align.capitalized) }
             activeMarks = active
         case "openLink":
             guard let href = message["href"] as? String, let url = URL(string: href),

@@ -76,7 +76,7 @@ import Testing
         let document = try #require(fixture.workspace.documents.first)
         #expect(fixture.workspace.quickPad.saveAutomatically)
         #expect(!document.saveAutomatically)
-        await document.toggleFormat()
+        await document.changeFormat(to: .md)
         #expect(document.currentFormat == .txt)
         #expect(document.url == original)
         #expect(document.text == "Plain text")
@@ -103,7 +103,7 @@ import Testing
     @Test func failedOpenAlertsWithoutAWindowOrQuickPadMessage() throws {
         let fixture = try WorkspaceFixture()
         defer { fixture.cleanUp() }
-        let unsupported = try fixture.file("notes.rtf", text: "Rich text")
+        let unsupported = try fixture.file("notes.rtfd", text: "Rich text")
         fixture.workspace.open(unsupported)
         #expect(fixture.workspace.documents.isEmpty)
         #expect(fixture.alerts.alerts == [PadError.unsupported.alert(during: .open)])

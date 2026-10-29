@@ -222,6 +222,26 @@ import Testing
         ]))
     }
 
+    @Test(arguments: [false, true])
+    func plainTextToRTFConfirmsCharactersRTFCantStore(confirms: Bool) async throws {
+        let alerts = AlertRecorder()
+        alerts.confirms = confirms
+        let fixture = try FormatSwitchFixture(format: .txt, alerts: alerts)
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        let source = "Null\u{0}here\nObject\u{FFFC}there"
+        document.text = source
+        await document.changeFormat(to: .rtf)
+        #expect(alerts.alerts == [PadAlert(title: "Convert this draft to RTF?",
+                                           message: PadFormatLoss.change(for: "invalid-character"), action: .convert)])
+        #expect(document.currentFormat == (confirms ? .rtf : .txt))
+        if confirms {
+            #expect(try PadRichText.document(from: document.text).plainText == "Null\u{FFFD}here\nObject\u{FFFD}there")
+        } else {
+            #expect(document.text == source)
+        }
+    }
+
     @Test func resetKeepsAConvertedDraftAndSavesItAsRTF() async throws {
         let fixture = try FormatSwitchFixture(format: .txt, choosesSaveFolder: true)
         defer { fixture.cleanUp() }

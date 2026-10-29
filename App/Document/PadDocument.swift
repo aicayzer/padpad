@@ -845,7 +845,10 @@ final class PadDocument {
         }
         switch (currentFormat, target) {
         case (.txt, .rtf):
-            return PadConversion(text: try PadRichText.text(for: RichTextDocument(plainText: content)), changes: [])
+            // RTF can't hold U+0000 or U+FFFC as text, so InkKitRTF replaces them with U+FFFD.
+            let replaced = content.unicodeScalars.contains { $0 == "\u{0}" || $0 == "\u{FFFC}" }
+            return PadConversion(text: try PadRichText.text(for: RichTextDocument(plainText: content)),
+                                 changes: replaced ? PadFormatLoss.changes(for: ["invalid-character"]) : [])
         case (.rtf, .txt):
             return PadConversion(text: try PadRichText.document(from: content).plainText, changes: PadFormatLoss.plainText)
         default:

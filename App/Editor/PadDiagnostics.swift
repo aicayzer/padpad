@@ -83,7 +83,7 @@ enum PadDiagnosticSanitizer {
         if let marks = raw["marks"] as? [String] {
             clean["marks"] = Array(marks.filter { ["strong", "emphasis", "inlineCode", "strike_through", "link", "highlight", "other"].contains($0) }.prefix(7))
         }
-        if let family = raw["fontFamily"] as? String {
+        if let family = raw["fontFamily"] as? String, family.count <= 512 {
             let allowed: Set<String> = ["system-ui", "ui-rounded", "Times New Roman", "Georgia", "-apple-system", "BlinkMacSystemFont", "sans-serif", "serif", "monospace", "ui-monospace", "SFMono-Regular", "SF Pro", "SF Pro Text", "Helvetica Neue", "Helvetica", "Arial", "Menlo", "Monaco", "Courier New"]
             let families = family.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
             clean["fontFamily"] = !families.isEmpty && families.count <= 12 && families.allSatisfy(allowed.contains) ? family : "other"

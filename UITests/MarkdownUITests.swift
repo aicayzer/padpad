@@ -1,4 +1,5 @@
 import AppKit
+import InkKitRTF
 import XCTest
 
 @MainActor
@@ -78,7 +79,7 @@ final class MarkdownUITests: XCTestCase {
         XCTAssertTrue(contents.contains("*Italic keyboard text*"), contents)
         XCTAssertTrue(contents.contains("https://example.com/padpad-ui-test"), contents)
 
-        XCTAssertFalse(app.buttons["documentFormat"].exists, "Saving locks the quick pad to its file type")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "Saving locks the quick pad to its file type")
         app.typeKey("n", modifierFlags: .command)
         waitForEditor(app)
         app.typeText("New document must not leak")
@@ -87,7 +88,7 @@ final class MarkdownUITests: XCTestCase {
         let fileWindow = app.windows[saved.lastPathComponent].firstMatch
         XCTAssertTrue(fileWindow.waitForExistence(timeout: 10), app.debugDescription)
         waitForEditor(app, in: fileWindow)
-        XCTAssertFalse(fileWindow.buttons["documentFormat"].exists, "Opened files retain their file type")
+        XCTAssertFalse(fileWindow.menuButtons["documentFormat"].exists, "Opened files retain their file type")
         fileWindow.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).click()
         app.typeKey(.downArrow, modifierFlags: .command)
         app.typeText("\nAfter reopen")
@@ -413,25 +414,25 @@ final class MarkdownUITests: XCTestCase {
         let app = launchPad()
         defer { app.terminate() }
         waitForEditor(app)
-        let format = app.buttons["documentFormat"].firstMatch
-        format.click()
+        let format = app.menuButtons["documentFormat"].firstMatch
+        app.chooseFormat("Plain Text")
         let plain = app.textViews.firstMatch
         XCTAssertTrue(plain.waitForExistence(timeout: 5), app.debugDescription)
         let source = "sdfsdf\n\nsadfsdfasdf\n\nasdfasdf\nsadfasdf"
         paste(source, into: app)
         app.typeKey("c", modifierFlags: [.command, .shift])
         waitForClipboard(source)
-        format.click()
+        app.chooseFormat("Markdown")
         waitForEditor(app)
         app.typeKey("c", modifierFlags: [.command, .shift])
         waitForClipboard(source)
         attach(app.dialogs.firstMatch.screenshot(), name: "TXT to Markdown keeps the final two lines separate")
         let html = try XCTUnwrap(NSPasteboard.general.string(forType: .html))
         XCTAssertTrue(html.contains("asdfasdf<br"), html)
-        format.click()
+        app.chooseFormat("Plain Text")
         XCTAssertTrue(plain.waitForExistence(timeout: 5))
         XCTAssertEqual(plain.value as? String, source, "Untouched Markdown must retain exact TXT source")
-        format.click()
+        app.chooseFormat("Markdown")
         waitForEditor(app)
         app.typeKey(.downArrow, modifierFlags: .command)
         app.typeText(" edited")
@@ -542,6 +543,58 @@ final class MarkdownUITests: XCTestCase {
         XCTAssertTrue(tableHeader.waitForExistence(timeout: 5), app.debugDescription)
         tableHeader.hover()
         attach(app.screenshot(), name: "InkKit table grabbers and nonempty and empty task items")
+    }
+
+    func testRTFFileUnderlinesWithCommandUAndSavesReadableRTF() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try XCTUnwrap(Bundle(for: MarkdownUITests.self).url(forResource: "textedit-marks", withExtension: "rtf"))
+        let file = directory.appending(path: "Letter.rtf")
+        try FileManager.default.copyItem(at: fixture, to: file)
+        let original = try RTFConverter.document(contentsOf: file)
+        let app = launchPad()
+        defer { app.terminate() }
+        app.typeKey("o", modifierFlags: .command)
+        open(file, in: app)
+        let window = app.windows.matching(NSPredicate(format: "title CONTAINS %@", "Letter.rtf")).firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10), app.debugDescription)
+        waitForEditor(app, in: window)
+        XCTAssertFalse(window.menuButtons["documentFormat"].exists, "Opened files retain their file type")
+
+        // The Aa menu offers alignment instead of headings, quotes and code blocks.
+        window.menuButtons["formattingMenu"].firstMatch.click()
+        XCTAssertTrue(app.menuItems["Alignment"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.menuItems["Headings"].exists)
+        XCTAssertFalse(app.menuItems["Quote"].exists)
+        XCTAssertFalse(app.menuItems["Code block"].exists)
+        attach(window.screenshot(), name: "RTF formatting menu")
+        app.typeKey(.escape, modifierFlags: [])
+
+        window.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeKey(.return, modifierFlags: [])
+        app.typeKey("u", modifierFlags: .command)
+        app.typeText("Underlined")
+        app.typeKey("u", modifierFlags: .command)
+        app.typeText(" plain")
+        attach(window.screenshot(), name: "RTF typed with Command-U")
+        app.typeKey("s", modifierFlags: .command)
+
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (try? RTFConverter.document(contentsOf: file).plainText.contains("Underlined plain")) == true
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 10), .completed, "Saved RTF did not contain the typed text")
+        let document = try RTFConverter.document(contentsOf: file)
+        XCTAssertEqual(document.blocks.count, original.blocks.count + 1)
+        XCTAssertEqual(Array(document.blocks.prefix(original.blocks.count)), original.blocks)
+        guard case .paragraph(let added) = document.blocks.last else { return XCTFail("Expected a new paragraph") }
+        let runs: [(String, [RichTextDocument.Mark])] = added.content.compactMap {
+            if case .text(let text, let marks) = $0 { (text, marks) } else { nil }
+        }
+        XCTAssertEqual(runs.first?.0, "Underlined")
+        XCTAssertTrue(runs.first?.1.contains(.underline) == true, "\(runs)")
+        XCTAssertEqual(runs.last?.0, " plain")
+        XCTAssertFalse(runs.last?.1.contains(.underline) == true, "\(runs)")
     }
 
     private func copyMarkdown(_ app: XCUIApplication, expecting text: String) {

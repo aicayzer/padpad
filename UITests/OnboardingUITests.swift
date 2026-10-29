@@ -33,7 +33,7 @@ final class OnboardingUITests: XCTestCase {
         app.typeKey(.return, modifierFlags: [])
         app.typeKey(.rightArrow, modifierFlags: [])
         XCTAssertTrue(practice.exists, "Return and Right must not bypass shortcut practice")
-        XCTAssertFalse(app.buttons["documentFormat"].exists)
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists)
         attach(app.dialogs.firstMatch.screenshot(), name: "Shortcut practice keeps Done visible and disabled")
         let explanationFrame = element("onboardingPracticeExplanation", in: app).frame
         let shortcut = element("onboardingShortcut", in: app)
@@ -53,7 +53,7 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertEqual(practicedFrame.height, explanationFrame.height, accuracy: 1,
                        "Both shortcut practice descriptions must occupy two lines")
         XCTAssertTrue(practice.exists, "Practicing must leave the onboarding visible")
-        XCTAssertFalse(app.buttons["documentFormat"].exists, "The editor must not appear before Continue")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "The editor must not appear before Continue")
         attach(app.dialogs.firstMatch.screenshot(), name: "Real global shortcut acknowledged in native onboarding")
 
         // A second global invocation must stay in practice, not open or dismiss the editor.
@@ -61,7 +61,7 @@ final class OnboardingUITests: XCTestCase {
         expectValue("Practiced 2 times", in: shortcut)
         XCTAssertTrue(done.exists, app.debugDescription)
         XCTAssertTrue(practice.exists, app.debugDescription)
-        XCTAssertFalse(app.buttons["documentFormat"].exists, app.debugDescription)
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, app.debugDescription)
         expectHittable(finish)
         XCTAssertTrue(finish.isEnabled)
         app.typeKey(.leftArrow, modifierFlags: [])
@@ -107,7 +107,7 @@ final class OnboardingUITests: XCTestCase {
         let source = "# Disposable plan\n\nKeep **this exact sentence**.\n\n- Bring the draft\n- Agree the owner\n"
         replaceText(source, in: text, app: app)
         expectValue(source, in: text)
-        app.buttons["documentFormat"].click()
+        app.chooseFormat("Markdown")
         waitForMarkdownEditor(app)
         XCTAssertFalse(app.buttons["Bold"].exists)
         attach(app.dialogs.firstMatch.screenshot(), name: "Plain source becomes editable formatted Markdown")
@@ -115,7 +115,7 @@ final class OnboardingUITests: XCTestCase {
         // Loading formatted content alone must retain the exact original source.
         switchToText(app)
         expectValue(source, in: app.textViews.firstMatch)
-        app.buttons["documentFormat"].click()
+        app.chooseFormat("Markdown")
         waitForMarkdownEditor(app)
         let web = app.webViews.firstMatch
         web.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
@@ -130,7 +130,7 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertTrue(edited.contains("**this exact sentence**"), edited)
         XCTAssertTrue(edited.contains("Bring the draft"), edited)
         attach(app.dialogs.firstMatch.screenshot(), name: "Markdown source includes the formatted editor change")
-        app.buttons["documentFormat"].hover()
+        app.menuButtons["documentFormat"].hover()
         attach(app.dialogs.firstMatch.screenshot(), name: "Format button with quiet hover background")
     }
 
@@ -172,7 +172,7 @@ final class OnboardingUITests: XCTestCase {
         let skip = app.buttons["onboardingSkip"].firstMatch
         expectHittable(skip)
         skip.click()
-        expectValue("TXT", in: app.buttons["documentFormat"].firstMatch)
+        expectValue("TXT", in: app.menuButtons["documentFormat"].firstMatch)
         expectHittable(app.textViews.firstMatch)
         expectValue(draft, in: app.textViews.firstMatch)
         XCTAssertFalse(element("onboardingIntro", in: app).exists)
@@ -308,7 +308,7 @@ final class OnboardingUITests: XCTestCase {
         app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         XCTAssertFalse(element("onboardingIntro", in: app).exists, "Initial launch must remain hidden")
-        XCTAssertFalse(app.buttons["documentFormat"].exists, "Initial launch must not open a draft")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "Initial launch must not open a draft")
         return app
     }
 
@@ -316,7 +316,7 @@ final class OnboardingUITests: XCTestCase {
         app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(element("onboardingIntro", in: app).waitForExistence(timeout: 5), app.debugDescription)
         expectHittable(app.buttons["onboardingStartPractice"].firstMatch)
-        XCTAssertFalse(app.buttons["documentFormat"].exists, "The normal editor stays hidden during introduction")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "The normal editor stays hidden during introduction")
     }
 
     private func pressGlobalShortcutFromFinder() {
@@ -334,15 +334,16 @@ final class OnboardingUITests: XCTestCase {
     private func waitForMarkdownEditor(_ app: XCUIApplication) {
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         expectHittable(app.menuButtons["formattingMenu"].firstMatch, timeout: 15)
-        expectValue("MD", in: app.buttons["documentFormat"].firstMatch)
-        XCTAssertEqual(app.buttons["documentFormat"].firstMatch.label, "Markdown")
+        expectValue("MD", in: app.menuButtons["documentFormat"].firstMatch)
+        // A menu button carries its accessible name as its title.
+        XCTAssertEqual(app.menuButtons["documentFormat"].firstMatch.title, "Markdown")
     }
 
     private func switchToText(_ app: XCUIApplication) {
-        let format = app.buttons["documentFormat"].firstMatch
+        let format = app.menuButtons["documentFormat"].firstMatch
         expectHittable(format)
         expectValue("MD", in: format)
-        format.click()
+        app.chooseFormat("Plain Text")
         expectValue("TXT", in: format)
         expectHittable(app.textViews.firstMatch)
     }

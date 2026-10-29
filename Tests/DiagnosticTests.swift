@@ -196,13 +196,16 @@ import Testing
         #expect(report["editorVersion"] as? String == metadata["editorVersion"] as? String)
     }
 
-    @Test func cancellationDuringReportLeavesClipboardUntouched() async throws {
+    @Test(arguments: [false, true]) func cancellationDuringReportLeavesClipboardUntouched(reenable: Bool) async throws {
         let (defaults, cache, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }
         let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
         diagnostics.enabled = true
         let source = DiagnosticSource()
-        source.onReport = { diagnostics.enabled = false }
+        source.onReport = {
+            diagnostics.enabled = false
+            if reenable { diagnostics.enabled = true }
+        }
         diagnostics.register(source)
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }

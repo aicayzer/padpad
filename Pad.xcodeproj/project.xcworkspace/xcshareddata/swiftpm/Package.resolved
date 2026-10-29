@@ -1,6 +1,15 @@
 {
-  "originHash" : "69c39523ac0471922b625cc56b8722155cfd2afd660bdd4f5ff67335b5b87714",
+  "originHash" : "aba79ede989cdda05b002d491aef20320e7cfed49c22ea6c6507fc43114d44d5",
   "pins" : [
+    {
+      "identity" : "inkkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/aicayzer/inkkit",
+      "state" : {
+        "revision" : "f6ade87e32ea375f12c6972bdf6895f1921a53bc",
+        "version" : "0.4.0"
+      }
+    },
     {
       "identity" : "keyboardshortcuts",
       "kind" : "remoteSourceControl",

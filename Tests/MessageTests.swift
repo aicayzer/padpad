@@ -156,7 +156,7 @@ import Testing
             requests += 1
             return nil
         })
-        let rich = fixture.root.appending(path: "notes.rtf")
+        let rich = fixture.root.appending(path: "notes.rtfd")
         try Data("Rich".utf8).write(to: rich)
         document.open(rich)
         #expect(alerts.alerts == [PadError.unsupported.alert(during: .open)])
@@ -209,7 +209,7 @@ import Testing
         let fixture = try MessageFixture()
         defer { fixture.cleanUp() }
         let document = PadDocument(defaults: fixture.defaults, defaultFolder: fixture.root, presentsWindow: false)
-        let rich = fixture.root.appending(path: "notes.rtf")
+        let rich = fixture.root.appending(path: "notes.rtfd")
         try Data("Rich".utf8).write(to: rich)
         #expect(!document.openDocument(rich))
         #expect(document.alert == nil)

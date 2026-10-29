@@ -2,16 +2,17 @@
 
 # PadPad
 
-A small place for text and Markdown on your Mac. Keep a quick pad close at hand, or open files in their own windows.
+A small place for text, Markdown, and RTF on your Mac. Keep a quick pad close at hand, or open files in their own windows.
 
 [Website](https://padpad.cyzr.me) | [Source](https://github.com/aicayzer/padpad) | [MIT license](LICENSE)
 
 ![PadPad editing formatted Markdown](Design/Screenshots/padpad-markdown.png)
 
 - Capture a thought, paste something, or tidy up text in the quick pad.
-- Edit individual Markdown and plain-text files without a note library.
+- Edit individual Markdown, plain-text, and RTF files without a note library.
 - Write formatted Markdown with headings, lists, links, quotes, and code, or edit its source from Format.
-- Find and replace text in Markdown and plain-text documents.
+- Edit RTF documents with bold, italic, underline, links, lists, tables, and alignment. PadPad doesn't open RTF documents with pictures or other content it can't keep.
+- Find and replace text in every document.
 - Save, rename, share, or copy your writing. Use File > Print to print or save a PDF.
 - Set a comfortable window size and reading width.
 

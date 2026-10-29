@@ -16,6 +16,8 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: "3.1.0"
+  # Keep at the same version as @aicayzer/inkkit in editor/package.json.
+  InkKitRTF: { url: https://github.com/aicayzer/inkkit, exactVersion: "0.4.0" }
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -24,7 +26,7 @@ settings:
     ENABLE_DEBUG_DYLIB: NO
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
-    MARKETING_VERSION: "1.1.10"
+    MARKETING_VERSION: "1.2.0"
     CURRENT_PROJECT_VERSION: 1
     VERSIONING_SYSTEM: apple-generic
     PAD_APP_IDENTIFIER: me.cyzr.pad
@@ -45,6 +47,8 @@ targets:
           - Resources/pad-squiggle.png
     dependencies:
       - package: KeyboardShortcuts
+      - package: InkKitRTF
+        product: InkKitRTF
     info:
       path: App/Info.plist
       properties:
@@ -61,8 +65,8 @@ targets:
           - CFBundleTypeName: Text Document
             CFBundleTypeRole: Editor
             LSHandlerRank: Alternate
-            LSItemContentTypes: [public.plain-text, net.daringfireball.markdown]
-            CFBundleTypeExtensions: [txt, md]
+            LSItemContentTypes: [public.plain-text, net.daringfireball.markdown, public.rtf]
+            CFBundleTypeExtensions: [txt, md, rtf]
     entitlements:
       path: App/Pad.entitlements
       properties:
@@ -118,8 +122,14 @@ targets:
     platform: macOS
     sources:
       - path: UITests
+      - path: Tests/Fixtures/textedit-marks.rtf
+        buildPhase: resources
+      - path: Tests/Fixtures/tm-image-rtfd-text.rtf
+        buildPhase: resources
     dependencies:
       - target: Pad
+      - package: InkKitRTF
+        product: InkKitRTF
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(PAD_APP_IDENTIFIER).uitests

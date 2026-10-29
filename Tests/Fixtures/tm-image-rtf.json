@@ -1,0 +1,14 @@
+{
+  "blocks" : [
+    {
+      "content" : [
+        {
+          "text" : "Before image  after image",
+          "type" : "text"
+        }
+      ],
+      "type" : "paragraph"
+    }
+  ],
+  "version" : 1
+}

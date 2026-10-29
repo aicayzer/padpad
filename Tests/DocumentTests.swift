@@ -1,4 +1,5 @@
 import AppKit
+import InkKitRTF
 import Testing
 @testable import Pad
 
@@ -1004,6 +1005,224 @@ import Testing
         #expect(files.error == PadError.nameExists.message())
         #expect(try String(contentsOf: unique, encoding: .utf8) == "arrived later")
     }
+
+    // MARK: RTF documents
+
+    /// Copies an Inkkit fixture into a disposable folder.
+    private func rtfFixture(_ name: String, in root: URL, as fileName: String? = nil) throws -> URL {
+        let source = try #require(Bundle(for: PadFixtureBundle.self).url(forResource: name, withExtension: nil),
+                                  "Missing fixture \(name)")
+        let destination = root.appending(path: fileName ?? name)
+        try FileManager.default.copyItem(at: source, to: destination)
+        return destination
+    }
+
+    @Test(arguments: ["textedit-marks", "textedit-lists", "textedit-table", "textedit-layout",
+                      "textutil-html", "tm-image-rtf", "word-style", "web-copy"])
+    func rtfFileOpensEditsSavesAndReopens(_ fixtureName: String) throws {
+        let name = "\(fixtureName).rtf"
+        let (files, root, _, _) = try fixture(format: .md)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try rtfFixture(name, in: root)
+        let original = try Data(contentsOf: url)
+        files.open(url)
+        #expect(files.url == url)
+        #expect(files.currentFormat == .rtf)
+        #expect(!files.isDirty)
+        var document = try PadRichText.document(from: files.text)
+        // Inkkit's golden JSON is the document every host must read from this file.
+        let golden = try Data(contentsOf: try rtfFixture("\(fixtureName).json", in: root))
+        #expect(document == (try RichTextDocument(json: golden)))
+        #expect(document == (try RTFConverter.document(fromRTF: original)))
+        document.blocks.append(.paragraph(.init([.text("Added in PadPad", marks: [.underline])], align: .right)))
+        files.text = try PadRichText.text(for: document)
+        #expect(files.isDirty)
+        files.save()
+        #expect(files.error == nil)
+        #expect(!files.isDirty)
+        let written = try Data(contentsOf: url)
+        #expect(written != original)
+        #expect(try RTFConverter.document(fromRTF: written) == document)
+
+        let (reopened, otherRoot, _, _) = try fixture()
+        defer { try? FileManager.default.removeItem(at: otherRoot) }
+        reopened.open(url)
+        #expect(reopened.currentFormat == .rtf)
+        #expect(try PadRichText.document(from: reopened.text) == document)
+        #expect(!reopened.isDirty)
+    }
+
+    @Test func uneditedRTFFileIsNeverRewritten() async throws {
+        let (files, root, _, _) = try fixture(selectSaveFile: { directory, _ in directory.appending(path: "copy.rtf") })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try rtfFixture("word-style.rtf", in: root)
+        let original = try Data(contentsOf: url)
+        let modified = try #require(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)
+        files.open(url)
+        // An explicit Save, a focus refresh, closing and quitting leave the file alone.
+        files.save()
+        files.refreshIfNeeded()
+        #expect(files.canTerminate())
+        files.close()
+        #expect(files.error == nil)
+        #expect(try Data(contentsOf: url) == original)
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == modified)
+        // Save As of an unedited document copies the original bytes, fonts and colors included.
+        await files.saveAs()
+        #expect(files.url == root.appending(path: "copy.rtf"))
+        #expect(try Data(contentsOf: root.appending(path: "copy.rtf")) == original)
+        #expect(try Data(contentsOf: url) == original)
+    }
+
+    @Test func refusedRTFFilesDoNotOpen() throws {
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(format: .md, alerts: alerts)
+        defer { try? FileManager.default.removeItem(at: root) }
+        files.text = "Keep this draft"
+        let picture = try rtfFixture("tm-image-rtfd-text.rtf", in: root)
+        let package = try rtfFixture("tm-image.rtfd", in: root)
+        let disguisedPackage = try rtfFixture("tm-image.rtfd", in: root, as: "disguised.rtf")
+        let notRTF = root.appending(path: "plain.rtf")
+        try Data("Just text".utf8).write(to: notRTF)
+        let damaged = root.appending(path: "damaged.rtf")
+        try Data(#"{\rtf1\ansi {\b unbalanced"#.utf8).write(to: damaged)
+        let cases: [(URL, PadAlert)] = [
+            (picture, PadAlert(title: "PadPad can’t open this document",
+                               message: "This document has pictures or other content PadPad can’t keep. Open it in TextEdit instead.")),
+            (package, try #require(PadError.unsupported.alert(during: .open))),
+            (disguisedPackage, PadAlert(title: "This file isn’t an RTF document",
+                                        message: "It has the .rtf extension but contains another format. Open it in TextEdit instead.")),
+            (notRTF, PadAlert(title: "This file isn’t an RTF document",
+                              message: "It has the .rtf extension but contains another format. Open it in TextEdit instead.")),
+            (damaged, PadAlert(title: "This RTF document is damaged", message: "PadPad can’t read it. Try opening it in TextEdit.")),
+        ]
+        for (url, alert) in cases {
+            #expect(!files.openDocument(url), "\(url.lastPathComponent) must not open")
+            #expect(alerts.last == alert, "\(url.lastPathComponent)")
+            #expect(files.url == nil)
+            #expect(files.text == "Keep this draft")
+            #expect(files.currentFormat == .md)
+        }
+        #expect(PadError.unsupported.alert(during: .open)?.message == "Choose a Markdown (.md), plain text (.txt), or RTF (.rtf) file.")
+
+        // A workspace never makes a window for a refused file.
+        let settingsSuite = "pad-rtf-refused-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: settingsSuite))
+        defer { defaults.removePersistentDomain(forName: settingsSuite) }
+        let workspace = PadWorkspace(settings: AppSettings(defaults: defaults), defaults: defaults,
+                                     presentsWindows: false, defaultFolder: root, presentAlert: alerts.present)
+        workspace.open(picture)
+        #expect(workspace.documents.isEmpty)
+        #expect(workspace.document(at: picture) == nil)
+    }
+
+    @Test func refusedRTFAlertsNameWhatPadPadCantKeep() {
+        func message(_ kinds: [RTFConversionError.UnsupportedContent], during context: PadProblem.Context = .open) -> String? {
+            expectedAlert(RTFConversionError.unsupportedContent(kinds), during: context)?.message
+        }
+        #expect(message([.equation]) == "This document has equations that PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.largeTable]) == "This document has a very large table that PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.mergedTableCells, .footnote, .equation])
+                == "This document has merged table cells, footnotes, and equations that PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.attachment, .equation])
+                == "This document has pictures or other content PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.comment], during: .read)
+                == "It was changed elsewhere and now has comments that PadPad can’t keep. Open it in TextEdit instead.")
+        // Saving never shows a reading alert.
+        #expect(expectedAlert(RTFConversionError.unsupportedContent([.table]), during: .save)?.title == "Couldn’t save your changes")
+    }
+
+    @Test func newerLossCodesHaveSentences() {
+        for code in ["mark-spaces", "empty-line", "link-underline", "invalid-character"] {
+            #expect(PadFormatLoss.change(for: code) != PadFormatLoss.change(for: "unknown-code"), "\(code)")
+        }
+    }
+
+    @Test func externalEditsToRTFFilesNeverOverwriteOrLoseContent() throws {
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(alerts: alerts)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try rtfFixture("textedit-marks.rtf", in: root)
+        files.open(url)
+        // A clean document follows a readable external change.
+        let external = RichTextDocument(blocks: [.paragraph(.init([.text("Changed elsewhere", marks: [.italic])]))])
+        let externalBytes = try RTFConverter.rtfData(from: external)
+        try externalBytes.write(to: url)
+        files.open(url)
+        #expect(try PadRichText.document(from: files.text) == external)
+        #expect(!files.isDirty)
+
+        // A clean document refuses an external change it can't keep and keeps the file safe from Save.
+        let pictureBytes = try Data(contentsOf: try rtfFixture("tm-image-rtfd-text.rtf", in: root, as: "picture.rtf"))
+        try pictureBytes.write(to: url)
+        files.open(url)
+        #expect(alerts.last == PadAlert(title: "PadPad can’t reload this document",
+                                        message: "It was changed elsewhere and now has pictures or other content PadPad can’t keep. Open it in TextEdit instead."))
+        #expect(try PadRichText.document(from: files.text) == external)
+        files.text = try PadRichText.text(for: RichTextDocument(blocks: [.paragraph(.init([.text("Local edit")]))]))
+        files.save()
+        #expect(alerts.last == PadError.changed.alert())
+        #expect(try Data(contentsOf: url) == pictureBytes)
+
+        // A dirty document reports the conflict and leaves the external bytes alone.
+        let laterBytes = try RTFConverter.rtfData(from: RichTextDocument(blocks: [.paragraph(.init([.text("Later")]))]))
+        try laterBytes.write(to: url)
+        let count = alerts.alerts.count
+        files.save()
+        #expect(alerts.alerts.count == count + 1)
+        #expect(alerts.last == PadError.changed.alert())
+        #expect(files.isDirty)
+        #expect(try Data(contentsOf: url) == laterBytes)
+    }
+
+    @Test func rtfWriteFailureKeepsTheDocumentAndTheFile() throws {
+        let alerts = AlertRecorder()
+        let (files, root, _, _) = try fixture(alerts: alerts)
+        let locked = root.appending(path: "locked", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let url = try rtfFixture("textedit-lists.rtf", in: locked, as: "lists.rtf")
+        let original = try Data(contentsOf: url)
+        files.open(url)
+
+        // A document the converter refuses fails before anything is written.
+        files.text = #"{"version":2,"blocks":[]}"#
+        files.save()
+        #expect(alerts.last == expectedAlert(RTFConversionError.invalidDocument("version"), during: .save))
+        #expect(alerts.last?.title == "Couldn’t save your changes")
+        #expect(files.isDirty)
+        #expect(try Data(contentsOf: url) == original)
+
+        // A folder that refuses the atomic write keeps the document open and edited.
+        let edited = try PadRichText.text(for: RichTextDocument(blocks: [.paragraph(.init([.text("Edited")]))]))
+        files.text = edited
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        files.save()
+        #expect(alerts.last?.action == .saveAs)
+        #expect(files.url == url)
+        #expect(files.text == edited)
+        #expect(files.isDirty)
+        #expect(try Data(contentsOf: url) == original)
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: locked.path)
+        #expect(leftovers == ["lists.rtf"])
+    }
+
+    @Test func sharingAnEditedRTFDocumentWritesRTF() throws {
+        let (files, root, _, _) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try rtfFixture("textedit-marks.rtf", in: root)
+        files.open(url)
+        #expect(try files.shareableURL(in: root) == url)
+        let edited = RichTextDocument(blocks: [.paragraph(.init([.text("Shared", marks: [.bold])]))])
+        files.text = try PadRichText.text(for: edited)
+        let shared = try files.shareableURL(in: root)
+        #expect(shared.lastPathComponent == "textedit-marks.rtf")
+        #expect(shared != url)
+        #expect(try RTFConverter.document(contentsOf: shared) == edited)
+    }
 }
 
 @MainActor
@@ -1036,3 +1255,6 @@ private final class PendingPadSelection {
         selection = nil
     }
 }
+
+/// Finds the test bundle, which holds the RTF fixtures copied from Inkkit.
+private final class PadFixtureBundle {}

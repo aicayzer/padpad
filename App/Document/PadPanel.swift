@@ -176,7 +176,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
             guard !self.pendingEditorInput.isComposing else { return }
             guard !self.files.startsInReadingMode || self.firstResponder !== self else { return }
             let awaitingEditor = self.firstResponder === self.pendingEditorInput || self.firstResponder === self
-            if self.files.currentFormat == .md {
+            if self.files.currentFormat.usesEditor {
                 guard let editor = self.files.markdownEditor else { return }
                 // Replacing the document can temporarily buffer input while DOM focus catches up.
                 guard awaitingEditor || editor.ownsFirstResponder else { return }
@@ -190,7 +190,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
     }
 
     func prepareMarkdownSnapshot() {
-        guard files.currentFormat == .md, let editor = files.markdownEditor else { return }
+        guard files.currentFormat.usesEditor, let editor = files.markdownEditor else { return }
         editor.hasExternalMarkedText = { [weak self] in self?.pendingEditorInput.isComposing == true }
         guard !pendingEditorInput.isComposing, pendingEditorInput.eventCount > 0 else { return }
         editor.enqueueInputs(pendingEditorInput.takeInputs())
@@ -226,7 +226,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
 
     override func sendEvent(_ event: NSEvent) {
         if handleOnboardingNavigation(event) { return }
-        if !files.onboarding.isPresented, files.currentFormat == .md, firstResponder !== pendingEditorInput,
+        if !files.onboarding.isPresented, files.currentFormat.usesEditor, firstResponder !== pendingEditorInput,
            files.markdownEditor?.capturePendingInput(event) == true { return }
         super.sendEvent(event)
         files.acceptMarkdownContentClick(event)
@@ -472,7 +472,7 @@ struct PadView: View {
     private var editorLayout: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
-                let centerWidth: CGFloat = Self.usesCenteredFormattingToolbar && showingFormatting && files.currentFormat == .md
+                let centerWidth: CGFloat = Self.usesCenteredFormattingToolbar && showingFormatting && files.currentFormat.usesEditor
                     ? (geometry.size.width >= 820 ? 280 : geometry.size.width >= 700 ? 144 : 36) : 0
                 let titleSpace = Self.usesCenteredFormattingToolbar && showingFormatting
                     ? max(40, (geometry.size.width - centerWidth) / 2 - 100)
@@ -515,7 +515,7 @@ struct PadView: View {
                         .frame(maxWidth: titleSpace + 12, alignment: .leading)
                         Spacer(minLength: 0)
                         HStack(spacing: 2) {
-                            if files.currentFormat == .md, let editor = files.markdownEditor {
+                            if files.currentFormat.usesEditor, let editor = files.markdownEditor {
                                 Group {
                                     if Self.usesCenteredFormattingToolbar {
                                         Button {
@@ -562,7 +562,7 @@ struct PadView: View {
                     }
                     .padding(.leading, 8)
                     .padding(.trailing, 10)
-                    if Self.usesCenteredFormattingToolbar, showingFormatting, files.currentFormat == .md, let editor = files.markdownEditor {
+                    if Self.usesCenteredFormattingToolbar, showingFormatting, files.currentFormat.usesEditor, let editor = files.markdownEditor {
                         PadMarkdownToolbar(editor: editor)
                             .frame(width: centerWidth)
                     }
@@ -582,7 +582,7 @@ struct PadView: View {
             }
 
             ZStack(alignment: .bottom) {
-                if files.currentFormat == .md {
+                if files.currentFormat.usesEditor {
                     if let editor = files.markdownEditor {
                         VStack(spacing: 0) {
                             if editor.showingFind { PadMarkdownFindBar(editor: editor) }
@@ -615,14 +615,23 @@ struct PadView: View {
                         .layoutPriority(1)
                     Spacer(minLength: 0)
                     if settings.showFormatToggle, files.isQuickPad, files.url == nil {
-                        Button(files.currentFormat.title) {
-                            Task { await files.toggleFormat() }
+                        Menu {
+                            ForEach(PadFormat.allCases) { format in
+                                Toggle(format.name, isOn: Binding(get: { files.currentFormat == format }, set: { chosen in
+                                    if chosen { Task { await files.changeFormat(to: format) } }
+                                }))
+                            }
+                        } label: {
+                            Text(files.currentFormat.title)
                         }
+                        .menuStyle(.button)
+                        .menuIndicator(.hidden)
                         .buttonStyle(PadFormatButtonStyle())
+                        .fixedSize()
                         .accessibilityIdentifier("documentFormat")
-                        .accessibilityLabel(files.currentFormat == .md ? "Markdown" : "Plain text")
+                        .accessibilityLabel(files.currentFormat.name)
                         .accessibilityValue(files.currentFormat.title)
-                        .help(files.currentFormat == .md ? "Switch to plain text" : "Switch to Markdown")
+                        .help("Change format")
                     }
                 }
                 .padding(.horizontal, 10)

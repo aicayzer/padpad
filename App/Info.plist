@@ -13,6 +13,7 @@
 			<array>
 				<string>txt</string>
 				<string>md</string>
+				<string>rtf</string>
 			</array>
 			<key>CFBundleTypeName</key>
 			<string>Text Document</string>
@@ -24,6 +25,7 @@
 			<array>
 				<string>public.plain-text</string>
 				<string>net.daringfireball.markdown</string>
+				<string>public.rtf</string>
 			</array>
 		</dict>
 	</array>

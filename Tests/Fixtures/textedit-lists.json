@@ -1,0 +1,186 @@
+{
+  "blocks" : [
+    {
+      "content" : [
+        {
+          "text" : "Bullets",
+          "type" : "text"
+        }
+      ],
+      "type" : "paragraph"
+    },
+    {
+      "items" : [
+        {
+          "blocks" : [
+            {
+              "content" : [
+                {
+                  "text" : "one",
+                  "type" : "text"
+                }
+              ],
+              "type" : "paragraph"
+            }
+          ]
+        },
+        {
+          "blocks" : [
+            {
+              "content" : [
+                {
+                  "text" : "two",
+                  "type" : "text"
+                }
+              ],
+              "type" : "paragraph"
+            },
+            {
+              "items" : [
+                {
+                  "blocks" : [
+                    {
+                      "content" : [
+                        {
+                          "text" : "nested a",
+                          "type" : "text"
+                        }
+                      ],
+                      "type" : "paragraph"
+                    }
+                  ]
+                },
+                {
+                  "blocks" : [
+                    {
+                      "content" : [
+                        {
+                          "text" : "nested b",
+                          "type" : "text"
+                        }
+                      ],
+                      "type" : "paragraph"
+                    }
+                  ]
+                }
+              ],
+              "ordered" : false,
+              "type" : "list"
+            }
+          ]
+        },
+        {
+          "blocks" : [
+            {
+              "content" : [
+                {
+                  "text" : "three",
+                  "type" : "text"
+                }
+              ],
+              "type" : "paragraph"
+            }
+          ]
+        }
+      ],
+      "ordered" : false,
+      "type" : "list"
+    },
+    {
+      "content" : [
+        {
+          "text" : "Numbered",
+          "type" : "text"
+        }
+      ],
+      "type" : "paragraph"
+    },
+    {
+      "items" : [
+        {
+          "blocks" : [
+            {
+              "content" : [
+                {
+                  "text" : "first",
+                  "type" : "text"
+                }
+              ],
+              "type" : "paragraph"
+            }
+          ]
+        },
+        {
+          "blocks" : [
+            {
+              "content" : [
+                {
+                  "text" : "second",
+                  "type" : "text"
+                }
+              ],
+              "type" : "paragraph"
+            },
+            {
+              "items" : [
+                {
+                  "blocks" : [
+                    {
+                      "content" : [
+                        {
+                          "text" : "sub a",
+                          "type" : "text"
+                        }
+                      ],
+                      "type" : "paragraph"
+                    }
+                  ]
+                },
+                {
+                  "blocks" : [
+                    {
+                      "content" : [
+                        {
+                          "text" : "sub b",
+                          "type" : "text"
+                        }
+                      ],
+                      "type" : "paragraph"
+                    }
+                  ]
+                }
+              ],
+              "ordered" : true,
+              "type" : "list"
+            }
+          ]
+        },
+        {
+          "blocks" : [
+            {
+              "content" : [
+                {
+                  "text" : "third",
+                  "type" : "text"
+                }
+              ],
+              "type" : "paragraph"
+            }
+          ]
+        }
+      ],
+      "ordered" : true,
+      "type" : "list"
+    },
+    {
+      "content" : [
+        {
+          "text" : "After.",
+          "type" : "text"
+        }
+      ],
+      "type" : "paragraph"
+    }
+  ],
+  "version" : 1
+}

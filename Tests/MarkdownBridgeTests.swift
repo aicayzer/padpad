@@ -1,4 +1,5 @@
 import AppKit
+import InkKitRTF
 import Testing
 import WebKit
 import PDFKit
@@ -648,7 +649,7 @@ struct MarkdownBridgeTests {
           {documentId:'old-document', generation:1},
           {documentId:'\(id.uuidString)', generation:0},
           {documentId:'\(id.uuidString)', generation:1}
-        ]) webkit.messageHandlers.host.postMessage({type:'changed', markdown:'Accepted', ...scope});
+        ]) webkit.messageHandlers.host.postMessage({type:'changed', format:'md', text:'Accepted', ...scope});
         true
         """)
         for _ in 0..<100 {
@@ -712,7 +713,7 @@ struct MarkdownBridgeTests {
         #expect(document.editorFeedback == nil)
 
         editor.onFeedback(warning, document.documentID)
-        await document.toggleFormat()
+        await document.changeFormat(to: .txt)
         #expect(document.currentFormat == .txt)
         #expect(document.editorFeedback == nil)
         editor.onFeedback(warning, document.documentID)
@@ -1178,6 +1179,159 @@ struct MarkdownBridgeTests {
         #expect(window.frame == frame)
     }
 
+    // MARK: RTF
+
+    @Test func rtfDocumentLoadsTypesAndSnapshotsAsStoredJSON() async throws {
+        let editor = PadMarkdownEditorController()
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 500, height: 400),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = editor.webView
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil; window.close() }
+        let loaded = RichTextDocument(blocks: [
+            .paragraph(.init([.text("Rich ", marks: [.bold]), .text("text")], align: .center)),
+            .list(.init(ordered: false, items: [.init(.init([.text("Item")]))])),
+        ])
+        var changes: [String] = []
+        editor.onChanged = { content, _ in changes.append(content) }
+        editor.load(try PadRichText.text(for: loaded), format: .rtf, documentID: UUID())
+        try await ready(editor)
+        #expect(try await editor.snapshot() == nil)
+        try await loadedFormat(editor, is: .rtf)
+        // A load puts the caret at the end of the document, in the left-aligned list item.
+        try await toolbarState(editor, contains: "alignLeft", active: true)
+        #expect(editor.formatAvailability["heading1"] == false)
+        #expect(editor.formatAvailability["quote"] == false)
+        #expect(editor.formatAvailability["codeBlock"] == false)
+        #expect(editor.formatAvailability["alignRight"] == true)
+        #expect(editor.formatAvailability["underline"] == true)
+
+        editor.pasteAsPlainText("Typed ")
+        let typed = try #require(try await editor.snapshot())
+        let document = try PadRichText.document(from: typed)
+        #expect(document.plainText.contains("Typed "))
+        #expect(document.blocks.count == 2)
+        #expect(typed == (try PadRichText.text(for: document)), "Snapshots are stored in canonical form")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while changes.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try PadRichText.document(from: #require(changes.last)) == document)
+
+        editor.format(.alignRight)
+        let aligned = try PadRichText.document(from: try #require(try await editor.snapshot()))
+        guard case .paragraph(let first) = aligned.blocks.first,
+              case .list(let list) = aligned.blocks.last,
+              case .paragraph(let item) = list.items.first?.blocks.first else { Issue.record("Unexpected blocks"); return }
+        #expect(first.align == .center)
+        #expect(item.align == .right)
+        try await toolbarState(editor, contains: "alignRight", active: true)
+
+        let clipboard = try await editor.clipboardSnapshot()
+        #expect(clipboard.text.contains("Typed "))
+        #expect(clipboard.html?.contains("text-align") == true)
+
+        // A Markdown load replaces the RTF document as a new generation.
+        editor.reload("Back to **Markdown**\n", format: .md, documentID: UUID())
+        try await ready(editor)
+        #expect(try await editor.snapshot() == nil)
+        try await loadedFormat(editor, is: .md)
+    }
+
+    @Test func quickPadSwitchesBetweenMarkdownAndRTFThroughTheEditor() async throws {
+        let suite = "pad-rtf-switch-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("md", forKey: "pad.format")
+        let alerts = AlertRecorder()
+        alerts.confirms = true
+        let document = PadDocument(defaults: defaults, presentsWindow: false, presentAlert: alerts.present)
+        document.text = "# Title\n\nBody with **bold**\n"
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 500, height: 400),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = editor.webView
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil; window.close() }
+        try await ready(editor)
+
+        await document.changeFormat(to: .rtf)
+        #expect(alerts.last == PadAlert(title: "Convert this draft to RTF?", message: "Headings become bold text.", action: .convert))
+        #expect(document.currentFormat == .rtf)
+        let rich = try PadRichText.document(from: document.text)
+        #expect(rich == RichTextDocument(blocks: [
+            .paragraph(.init([.text("Title", marks: [.bold])])),
+            .paragraph(.init([.text("Body with "), .text("bold", marks: [.bold])])),
+        ]))
+        try await ready(editor)
+        try await loadedFormat(editor, is: .rtf)
+        #expect(try await editor.snapshot() == nil)
+
+        let alertCount = alerts.alerts.count
+        await document.changeFormat(to: .md)
+        #expect(alerts.alerts.count == alertCount, "RTF to Markdown loses nothing here")
+        #expect(document.currentFormat == .md)
+        #expect(document.text == "**Title**\n\nBody with **bold**\n")
+        try await ready(editor)
+        #expect(try await editor.snapshot() == nil)
+
+        await document.changeFormat(to: .rtf)
+        await document.changeFormat(to: .txt)
+        #expect(document.currentFormat == .txt)
+        #expect(document.text == "Title\nBody with bold")
+    }
+
+    @Test func rtfFileOpensTypesSavesAndReadsBack() async throws {
+        let suite = "pad-rtf-file-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set(false, forKey: "pad.saveAutomatically")
+        let folder = FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "marks.rtf")
+        let source = try #require(Bundle(for: BridgeFixtureBundle.self).url(forResource: "textedit-marks", withExtension: "rtf"))
+        try FileManager.default.copyItem(at: source, to: file)
+        let original = try RTFConverter.document(contentsOf: file)
+        let oldPolicy = NSApp.activationPolicy()
+        let settings = AppSettings(defaults: defaults)
+        let workspace = PadWorkspace(settings: settings, defaults: defaults, presentAlert: AlertRecorder().present)
+        workspace.open(file)
+        let document = try #require(workspace.document(at: file))
+        let window = try #require(document.nativeWindow)
+        defer {
+            window.orderOut(nil); window.contentView = nil
+            NSApp.setActivationPolicy(oldPolicy)
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let deadline = ContinuousClock.now + .seconds(15)
+        while document.markdownEditor == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let editor = try #require(document.markdownEditor)
+        try await ready(editor)
+        #expect(document.currentFormat == .rtf)
+        try await loadedFormat(editor, is: .rtf)
+        #expect(try await editor.snapshot() == nil)
+
+        editor.pasteAsPlainText("Typed in PadPad ")
+        document.save()
+        try await settled(document)
+        let saved = try RTFConverter.document(contentsOf: file)
+        #expect(saved.plainText.contains("Typed in PadPad "))
+        #expect(saved.plainText.replacingOccurrences(of: "Typed in PadPad ", with: "") == original.plainText)
+        #expect(!document.isDirty)
+    }
+
+    private func loadedFormat(_ editor: PadMarkdownEditorController, is format: PadFormat) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while editor.documentFormat != format, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(editor.documentFormat == format)
+    }
+
     private func ready(_ editor: PadMarkdownEditorController) async throws {
         let deadline = ContinuousClock.now + .seconds(15)
         while !editor.isReady, ContinuousClock.now < deadline {
@@ -1186,3 +1340,6 @@ struct MarkdownBridgeTests {
         try #require(editor.isReady, "The bundled Markdown editor did not become ready")
     }
 }
+
+/// Finds the test bundle, which holds the RTF fixtures copied from Inkkit.
+private final class BridgeFixtureBundle {}

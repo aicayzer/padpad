@@ -1,15 +1,9 @@
 import AppKit
 import Darwin
+import InkKitRTF
 import KeyboardShortcuts
 import Observation
 import UniformTypeIdentifiers
-
-enum PadFormat: String, CaseIterable, Identifiable {
-    case txt, md
-
-    var id: String { rawValue }
-    var title: String { rawValue.uppercased() }
-}
 
 enum PadReuse: Int, CaseIterable, Identifiable {
     case alwaysNew = 0, fiveMinutes = 5, tenMinutes = 10, fifteenMinutes = 15, thirtyMinutes = 30, oneHour = 60
@@ -121,6 +115,8 @@ final class PadDocument {
     private var folderScope: URL?
     private var panel: (any PadDocumentWindow)?
     private var dismissedAt: Date?
+    /// The format of a draft that has no file. Assign it only through `replaceDraft`, so the stored text
+    /// always matches its format: RTF text is JSON, and Markdown or plain text written over it would be lost.
     private var scratchFormat: PadFormat
     private var snapshotApplied = false
     private var editorLoadedSource = ""
@@ -128,6 +124,8 @@ final class PadDocument {
     private(set) var markdownEditor: PadMarkdownEditorController?
     @ObservationIgnored var editorClipboard: (@MainActor () async throws -> PadClipboardContents)?
     @ObservationIgnored var editorSnapshot: (@MainActor () async throws -> String?)?
+    /// Converts the loaded editor document between Markdown and RTF.
+    @ObservationIgnored var editorConversion: (@MainActor (PadFormat) async throws -> PadConversion)?
     private var pendingName: String?
     private var nextNumber: Int
     private enum Operation { case transition, filePanel, sharing }
@@ -242,7 +240,7 @@ final class PadDocument {
         defer { operation = nil }
         guard await captureLatestEditor(), documentID == id else { return }
         do {
-            if currentFormat == .md {
+            if currentFormat.usesEditor {
                 guard let editor = markdownEditor else { throw PadMarkdownEditorError.notReady }
                 try await editor.printDocument()
             } else {
@@ -255,23 +253,23 @@ final class PadDocument {
     }
 
     func mountMarkdownEditor() {
-        guard !onboarding.isPresented, currentFormat == .md, markdownEditor == nil else { return }
+        guard !onboarding.isPresented, currentFormat.usesEditor, markdownEditor == nil else { return }
         let editor = PadMarkdownEditorController()
-        editor.onChanged = { [weak self] markdown, id in
-            guard let self, self.documentID == id, self.currentFormat == .md, !self.onboarding.isPresented else { return }
-            self.text = markdown
+        editor.onChanged = { [weak self] content, id in
+            guard let self, self.documentID == id, self.currentFormat.usesEditor, !self.onboarding.isPresented else { return }
+            self.text = content
             if self.editorFeedback?.source == .edit { self.editorFeedback = nil }
         }
         editor.onFeedback = { [weak self] feedback, id in
-            guard let self, self.documentID == id, self.currentFormat == .md, !self.onboarding.isPresented else { return }
+            guard let self, self.documentID == id, self.currentFormat.usesEditor, !self.onboarding.isPresented else { return }
             self.editorFeedback = feedback
         }
         editor.onError = { [weak self] error in
-            guard let self, self.currentFormat == .md, !self.onboarding.isPresented else { return }
+            guard let self, self.currentFormat.usesEditor, !self.onboarding.isPresented else { return }
             self.report(error, during: .editor)
         }
         editor.onReady = { [weak self] in
-            guard let self, !self.onboarding.isPresented, self.currentFormat == .md else { return }
+            guard let self, !self.onboarding.isPresented, self.currentFormat.usesEditor else { return }
             guard !self.holdInitialReadingFocus() else { return }
             self.panel?.requestEditorFocus()
         }
@@ -284,13 +282,17 @@ final class PadDocument {
             guard let editor else { throw PadMarkdownEditorError.unavailable }
             return try await editor.clipboardSnapshot()
         }
+        editorConversion = { [weak editor] format in
+            guard let editor else { throw PadMarkdownEditorError.unavailable }
+            return try await editor.convert(to: format)
+        }
         editorLoadedSource = text
         editorLoadedDocumentID = documentID
-        editor.load(text, documentID: documentID)
+        editor.load(text, format: currentFormat, documentID: documentID)
     }
 
     func acceptMarkdownContentClick(_ event: NSEvent) {
-        guard event.type == .leftMouseDown, !onboarding.isPresented, currentFormat == .md,
+        guard event.type == .leftMouseDown, !onboarding.isPresented, currentFormat.usesEditor,
               let editor = markdownEditor, let window = editor.webView.window,
               event.windowNumber == window.windowNumber, let content = window.contentView,
               let parent = content.superview,
@@ -330,15 +332,15 @@ final class PadDocument {
         editorFeedback = nil
         editorLoadedSource = text
         if editorLoadedDocumentID == documentID {
-            markdownEditor?.reload(text, documentID: documentID)
+            markdownEditor?.reload(text, format: currentFormat, documentID: documentID)
         } else {
             editorLoadedDocumentID = documentID
-            markdownEditor?.load(text, documentID: documentID)
+            markdownEditor?.load(text, format: currentFormat, documentID: documentID)
         }
     }
 
     private func captureLatestEditor() async -> Bool {
-        guard !onboarding.isPresented, currentFormat == .md, let editorSnapshot else { return true }
+        guard !onboarding.isPresented, currentFormat.usesEditor, let editorSnapshot else { return true }
         let id = documentID
         panel?.prepareMarkdownSnapshot()
         do {
@@ -357,7 +359,7 @@ final class PadDocument {
 
     // Web edits are asynchronous; hold document transitions until the final keystroke is read.
     private func synchronizeEditorThen(_ action: @escaping @MainActor () -> Void) -> Bool {
-        guard !snapshotApplied, currentFormat == .md, editorSnapshot != nil else { return false }
+        guard !snapshotApplied, currentFormat.usesEditor, editorSnapshot != nil else { return false }
         guard !isBusy else { return true }
         operation = .transition
         Task {
@@ -372,7 +374,7 @@ final class PadDocument {
     }
 
     var markdownOwnsFirstResponder: Bool {
-        currentFormat == .md && markdownEditor?.webView.window === NSApp.keyWindow
+        currentFormat.usesEditor && markdownEditor?.webView.window === NSApp.keyWindow
             && markdownEditor?.ownsFirstResponder == true
     }
 
@@ -390,7 +392,8 @@ final class PadDocument {
         guard await captureLatestEditor(), documentID == id else { return }
         do {
             let contents: PadClipboardContents
-            if currentFormat == .md, !asMarkdown {
+            // Copy as Markdown copies Markdown source only; an RTF document always copies readable text and HTML.
+            if currentFormat == .rtf || (currentFormat == .md && !asMarkdown) {
                 guard let editorClipboard else { throw PadMarkdownEditorError.unavailable }
                 contents = try await editorClipboard()
             } else {
@@ -445,8 +448,7 @@ final class PadDocument {
     func finishOnboarding(includeExample: Bool) {
         guard !isBusy, onboarding.isPresented else { return }
         if includeExample, isPristineScratch {
-            scratchFormat = .md
-            text = """
+            replaceDraft(format: .md, text: """
             # A little room to think
 
             Write a thought here. **Keep what matters.**
@@ -459,7 +461,7 @@ final class PadDocument {
 
             > Your shortcut brings this pad back whenever you need it.
 
-            """
+            """)
         }
         onboarding.complete()
         reloadEditor()
@@ -615,12 +617,11 @@ final class PadDocument {
         startsInReadingMode = false
         pendingReadingDocumentID = nil
         documentID = UUID()
-        scratchFormat = format
         documentScope?.stopAccessingSecurityScopedResource()
         documentScope = nil
         url = nil
         baseline = nil
-        text = ""
+        replaceDraft(format: format, text: "")
         savedText = ""
         error = nil
         reportedReadAlert = nil
@@ -642,7 +643,7 @@ final class PadDocument {
 
     private func presentOpenPanel() async -> URL? {
         let picker = NSOpenPanel()
-        picker.allowedContentTypes = [.plainText, UTType(filenameExtension: "md") ?? .plainText]
+        picker.allowedContentTypes = PadFormat.allCases.map(\.contentType)
         picker.allowsOtherFileTypes = false
         guard await present(picker, parent: dialogParent) == .OK else { return nil }
         return picker.url
@@ -660,7 +661,8 @@ final class PadDocument {
     @discardableResult
     func openDocument(_ file: URL) -> Bool {
         let leavingOnboarding = onboarding.isPresented
-        guard ["txt", "md"].contains(file.pathExtension.lowercased()) else {
+        // RTFD packages are not supported; their extension is refused like any other type.
+        guard let format = PadFormat(rawValue: file.pathExtension.lowercased()) else {
             onboarding.dismiss()
             if isQuickPad || url != nil { show() }
             if leavingOnboarding { panel?.resumeEditor() }
@@ -676,8 +678,8 @@ final class PadDocument {
         }
         let accessing = file.startAccessingSecurityScopedResource()
         do {
-            let bytes = try Data(contentsOf: file)
-            guard let content = String(data: bytes, encoding: .utf8) else { throw PadError.encoding }
+            // An RTF file that holds content PadPad can't keep throws here, before anything is replaced.
+            let (bytes, content) = try format.read(file)
             guard finishCurrent() else {
                 if accessing { file.stopAccessingSecurityScopedResource() }
                 if leavingOnboarding {
@@ -692,7 +694,7 @@ final class PadDocument {
             startsInReadingMode = true
             documentID = UUID()
             url = file
-            pendingReadingDocumentID = currentFormat == .md ? documentID : nil
+            pendingReadingDocumentID = currentFormat.usesEditor ? documentID : nil
             text = content
             savedText = content
             baseline = bytes
@@ -728,10 +730,14 @@ final class PadDocument {
         guard let url else { return }
         do {
             let bytes = try Data(contentsOf: url)
-            guard let content = String(data: bytes, encoding: .utf8) else { throw PadError.encoding }
             if isDirty {
+                if currentFormat != .rtf, String(data: bytes, encoding: .utf8) == nil { throw PadError.encoding }
                 guard bytes == baseline else { throw PadError.changed }
+            } else if currentFormat == .rtf, bytes == baseline {
+                // Converting unchanged bytes again would only reset the editor.
             } else {
+                // A refused RTF change keeps the old baseline, so a later save reports the conflict.
+                let content = try currentFormat.decode(bytes)
                 text = content
                 savedText = content
                 baseline = bytes
@@ -764,14 +770,21 @@ final class PadDocument {
         do {
             if let url {
                 guard try Data(contentsOf: url) == baseline else { throw PadError.changed }
-                let bytes = Data(text.utf8)
+                // Writing RTF restyles the whole file, so an unedited RTF file is never rewritten.
+                if currentFormat == .rtf, !isDirty {
+                    notice = "Saved"
+                    error = nil
+                    return
+                }
+                // Conversion finishes before the atomic write, so a failure never leaves partial bytes.
+                let bytes = try currentFormat.encode(text)
                 try bytes.write(to: url, options: .atomic)
                 baseline = bytes
                 savedText = text
                 notice = "Saved"
             } else {
                 guard try obtainSaveFolderAccess() else { return }
-                let bytes = Data(text.utf8)
+                let bytes = try currentFormat.encode(text)
                 let destination: URL
                 if let pendingName {
                     destination = folder.appending(path: try PadFilename.filename(stem: pendingName, extension: currentFormat.rawValue))
@@ -794,20 +807,84 @@ final class PadDocument {
         } catch { report(error, during: namesFile ? .nameFormat : .save) }
     }
 
-    func toggleFormat() async {
-        guard isQuickPad, url == nil, !isBusy, !onboarding.isPresented else { return }
-        let target: PadFormat = currentFormat == .md ? .txt : .md
+    /// Switches an unsaved quick-pad draft to another format. Markdown and plain text keep the exact source;
+    /// RTF converts, and a conversion that loses something changes nothing until the person confirms it.
+    func changeFormat(to target: PadFormat) async {
+        guard isQuickPad, url == nil, !isBusy, !onboarding.isPresented, target != currentFormat else { return }
         operation = .transition
         defer { operation = nil }
         guard await captureLatestEditor() else { return }
-        scratchFormat = target
-        // The source is deliberately unchanged. TXT shows Markdown's exact source bytes.
+        let id = documentID
+        guard let conversion = await confirmedConversion(of: text, to: target, savingCopy: false),
+              documentID == id else {
+            show()
+            panel?.resumeEditor()
+            return
+        }
+        replaceDraft(format: target, text: conversion.text)
         reloadEditor()
         error = nil
         notice = nil
         updateTitle()
         show()
         panel?.resumeEditor()
+    }
+
+    /// Changes a draft's format and text together. An empty text is valid in every format.
+    private func replaceDraft(format newFormat: PadFormat, text newText: String) {
+        scratchFormat = newFormat
+        text = newText
+    }
+
+    /// Converts text from the current format. Markdown and plain text share their source. Markdown and RTF
+    /// convert in the editor; plain text and RTF convert with InkKitRTF.
+    private func convert(_ content: String, to target: PadFormat) async throws -> PadConversion {
+        let sharedSource: Set<PadFormat> = [.md, .txt]
+        if currentFormat == target || (sharedSource.contains(currentFormat) && sharedSource.contains(target)) {
+            return PadConversion(text: content, changes: [])
+        }
+        switch (currentFormat, target) {
+        case (.txt, .rtf):
+            // RTF can't hold U+0000 or U+FFFC as text, so InkKitRTF replaces them with U+FFFD.
+            let replaced = content.unicodeScalars.contains { $0 == "\u{0}" || $0 == "\u{FFFC}" }
+            return PadConversion(text: try PadRichText.text(for: RichTextDocument(plainText: content)),
+                                 changes: replaced ? PadFormatLoss.changes(for: ["invalid-character"]) : [])
+        case (.rtf, .txt):
+            return PadConversion(text: try PadRichText.document(from: content).plainText, changes: PadFormatLoss.plainText)
+        default:
+            guard let editorConversion else { throw PadMarkdownEditorError.unavailable }
+            return try await editorConversion(target)
+        }
+    }
+
+    /// The converted text, or nil when the conversion failed or the person kept the original.
+    private func confirmedConversion(of content: String, to target: PadFormat, savingCopy: Bool) async -> PadConversion? {
+        let id = documentID
+        let conversion: PadConversion
+        do {
+            conversion = try await convert(content, to: target)
+        } catch {
+            report(error, during: .convert)
+            return nil
+        }
+        guard documentID == id else { return nil }
+        if conversion.changes.isEmpty { return conversion }
+        let alert = PadAlert.conversion(to: target, savingCopy: savingCopy, changes: conversion.changes)
+        guard await confirm(alert), documentID == id else { return nil }
+        return conversion
+    }
+
+    /// Shows a decision as an alert and waits for it. The document stays busy until the alert closes.
+    private func confirm(_ alert: PadAlert) async -> Bool {
+        guard self.alert == nil else { return false }
+        self.alert = alert
+        let window = nativeWindow?.isVisible == true ? nativeWindow : nil
+        return await withCheckedContinuation { continuation in
+            presentAlert(alert, window) { confirmed in
+                self.alert = nil
+                continuation.resume(returning: confirmed)
+            }
+        }
     }
 
     func saveAs(targetFormat: PadFormat? = nil) async {
@@ -818,7 +895,7 @@ final class PadDocument {
         let previousFormat = currentFormat
         let saveFormat = targetFormat ?? currentFormat
         let id = documentID
-        let content = text
+        var content = text
         let directory = url?.deletingLastPathComponent() ?? folder
         let suggestion: (name: String, number: Int?)
         do {
@@ -846,23 +923,38 @@ final class PadDocument {
         guard let destination, documentID == id else { return }
         let accessing = destination.startAccessingSecurityScopedResource()
         do {
-            guard PadFormat(rawValue: destination.pathExtension.lowercased()) != nil else { throw PadError.unsupported }
+            guard let destinationFormat = PadFormat(rawValue: destination.pathExtension.lowercased()) else { throw PadError.unsupported }
             guard workspace?.document(at: destination, excluding: self) == nil else { throw PadError.nameExists }
             if let targetFormat {
-                guard destination.pathExtension.lowercased() == targetFormat.rawValue else { throw PadError.unsupported }
+                guard destinationFormat == targetFormat else { throw PadError.unsupported }
                 guard !FileManager.default.fileExists(atPath: destination.path) else { throw PadError.nameExists }
             }
             if destination.standardizedFileURL == url?.standardizedFileURL,
                try Data(contentsOf: destination) != baseline {
                 throw PadError.changed
             }
-            let bytes = Data(content.utf8)
+            let unchangedCopy = destinationFormat == previousFormat && content == savedText ? baseline : nil
+            var converted = false
+            if destinationFormat != previousFormat {
+                // The copy converts; the original file keeps its format and bytes.
+                guard let conversion = await confirmedConversion(of: content, to: destinationFormat, savingCopy: url != nil),
+                      documentID == id else {
+                    if accessing { destination.stopAccessingSecurityScopedResource() }
+                    return
+                }
+                converted = conversion.text != content
+                content = conversion.text
+            }
+            // An unedited copy keeps the original bytes, including RTF fonts and colors.
+            let bytes = try unchangedCopy ?? destinationFormat.encode(content)
             try bytes.write(to: destination, options: targetFormat == nil ? .atomic : .withoutOverwriting)
             documentScope?.stopAccessingSecurityScopedResource()
             documentScope = accessing ? destination : nil
             url = destination
             pendingName = nil
             baseline = bytes
+            // A converted copy replaces the text; otherwise a late edit stays unsaved.
+            if converted { text = content }
             savedText = content
             // A retained web editor must follow native edits when Save As changes formats.
             if currentFormat != previousFormat {
@@ -885,10 +977,9 @@ final class PadDocument {
 
     private func presentSavePanel(directory: URL, name: String, targetFormat: PadFormat? = nil) async -> URL? {
         let picker = NSSavePanel()
-        picker.allowedContentTypes = [.plainText, UTType(filenameExtension: "md") ?? .plainText]
+        picker.allowedContentTypes = PadFormat.allCases.map(\.contentType)
         if let targetFormat {
-            picker.allowedContentTypes = targetFormat == .md
-                ? [UTType(filenameExtension: "md") ?? .plainText] : [.plainText]
+            picker.allowedContentTypes = [targetFormat.contentType]
             picker.allowsOtherFileTypes = false
         }
         picker.directoryURL = directory
@@ -933,7 +1024,7 @@ final class PadDocument {
         else if let pendingName { name = "\(pendingName).\(currentFormat.rawValue)" }
         else { name = "Untitled.\(currentFormat.rawValue)" }
         let snapshot = directory.appending(path: name)
-        try Data(text.utf8).write(to: snapshot, options: .atomic)
+        try currentFormat.encode(text).write(to: snapshot, options: .atomic)
         return snapshot
     }
 
@@ -1059,9 +1150,8 @@ final class PadDocument {
 
     func resetQuickPadPreferences() {
         floating = true
-        if url == nil { format = .md }
-        scratchFormat = .md
-        defaults.set(PadFormat.md.rawValue, forKey: Self.formatKey)
+        // The default applies to future drafts; the current draft keeps its format and text.
+        format = .md
         saveAutomatically = false
         reusePeriod = .fifteenMinutes
         nameParts = PadFilename.defaultParts
@@ -1154,6 +1244,19 @@ final class PadDocument {
     }
 
     private func present(_ alert: PadAlert) {
+        // A file that fails to open has no window, and an alert without a window can open where nobody
+        // sees it. The alert becomes a sheet on the window the person is using, or on the quick pad,
+        // which stays busy, and so visible, until the alert closes.
+        // Only open problems happen without a window, so the host's Choose File action still fits.
+        if nativeWindow == nil, let workspace {
+            let active = workspace.activeDocument
+            let host = active !== self && active.nativeWindow?.isVisible == true ? active : workspace.quickPad
+            if host !== self {
+                if host.nativeWindow?.isVisible != true { host.show() }
+                host.present(alert)
+                return
+            }
+        }
         guard self.alert == nil else { return }
         self.alert = alert
         let window = nativeWindow?.isVisible == true ? nativeWindow : nil
@@ -1164,6 +1267,7 @@ final class PadDocument {
             case .saveAs: Task { await self.saveAs() }
             case .openSettings: self.showSettings()
             case .chooseFile: Task { await (self.workspace?.activeDocument ?? self).openPicker() }
+            case .convert: break
             }
         }
     }
@@ -1204,7 +1308,7 @@ final class PadDocument {
 
     func show() {
         dismissedAt = nil
-        markdownEditor?.allowsFocus = !onboarding.isPresented && currentFormat == .md
+        markdownEditor?.allowsFocus = !onboarding.isPresented && currentFormat.usesEditor
         if onboarding.isPresented { isActive = false }
         guard presentsWindow else { return }
         if panel == nil {

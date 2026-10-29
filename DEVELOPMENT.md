@@ -1,6 +1,6 @@
 # Development
 
-PadPad is a native SwiftUI/AppKit app with an offline Markdown editor. Read [AGENTS.md](AGENTS.md) for architecture and contribution conventions, and [RELEASING.md](RELEASING.md) for distribution.
+PadPad is a native SwiftUI/AppKit app with an offline InkKit editor for Markdown and RTF. RTF files convert through the `InkKitRTF` Swift package from the InkKit repository, at the same version as the bundled `@aicayzer/inkkit` package. Read [AGENTS.md](AGENTS.md) for architecture and contribution conventions, and [RELEASING.md](RELEASING.md) for distribution.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ The committed Xcode project is generated from `project.yml`. After changing proj
 xcodegen generate
 ```
 
-Open `Pad.xcodeproj` and select the shared **Pad** scheme. Debug builds use **PadPad Dev**, with separate preferences and identity. The app build installs and bundles the Markdown editor through its build script.
+Open `Pad.xcodeproj` and select the shared **Pad** scheme. Debug builds use **PadPad Dev**, with separate preferences and identity. The app build installs and bundles the editor through its build script.
 
 Signing configuration is local and ignored, so a fresh clone or isolated source copy does not include it. Before running the app or native tests, use the repository's credential-manager mapping to run `scripts/render-local-signing.sh`. Use the existing Apple Development identity, rather than ad-hoc signing, for interactive development checks; changing an untrusted build can trigger another macOS approval prompt.
 

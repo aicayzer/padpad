@@ -204,6 +204,7 @@ struct SettingsView: View {
                 Picker("Format", selection: $document.format) {
                     Text("Markdown (.md)").tag(PadFormat.md)
                     Text("Plain text (.txt)").tag(PadFormat.txt)
+                    Text("RTF (.rtf)").tag(PadFormat.rtf)
                 }
                 .tint(.primary)
                 Toggle("Save automatically", isOn: $document.saveAutomatically)

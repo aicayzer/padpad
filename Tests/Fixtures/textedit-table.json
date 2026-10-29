@@ -1,0 +1,92 @@
+{
+  "blocks" : [
+    {
+      "content" : [
+        {
+          "text" : "Before table",
+          "type" : "text"
+        }
+      ],
+      "type" : "paragraph"
+    },
+    {
+      "rows" : [
+        [
+          {
+            "content" : [
+              {
+                "marks" : [
+                  {
+                    "type" : "bold"
+                  }
+                ],
+                "text" : "H1",
+                "type" : "text"
+              }
+            ]
+          },
+          {
+            "content" : [
+              {
+                "marks" : [
+                  {
+                    "type" : "bold"
+                  }
+                ],
+                "text" : "H2",
+                "type" : "text"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "content" : [
+              {
+                "text" : "a",
+                "type" : "text"
+              }
+            ]
+          },
+          {
+            "content" : [
+              {
+                "text" : "b",
+                "type" : "text"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "content" : [
+              {
+                "text" : "c",
+                "type" : "text"
+              }
+            ]
+          },
+          {
+            "content" : [
+              {
+                "text" : "d",
+                "type" : "text"
+              }
+            ]
+          }
+        ]
+      ],
+      "type" : "table"
+    },
+    {
+      "content" : [
+        {
+          "text" : "After table",
+          "type" : "text"
+        }
+      ],
+      "type" : "paragraph"
+    }
+  ],
+  "version" : 1
+}

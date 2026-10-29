@@ -1017,9 +1017,10 @@ import Testing
         return destination
     }
 
-    @Test(arguments: ["textedit-marks.rtf", "textedit-lists.rtf", "textedit-table.rtf", "textedit-layout.rtf",
-                      "word-style.rtf", "web-copy.rtf"])
-    func rtfFileOpensEditsSavesAndReopens(_ name: String) throws {
+    @Test(arguments: ["textedit-marks", "textedit-lists", "textedit-table", "textedit-layout",
+                      "textutil-html", "tm-image-rtf", "word-style", "web-copy"])
+    func rtfFileOpensEditsSavesAndReopens(_ fixtureName: String) throws {
+        let name = "\(fixtureName).rtf"
         let (files, root, _, _) = try fixture(format: .md)
         defer { try? FileManager.default.removeItem(at: root) }
         let url = try rtfFixture(name, in: root)
@@ -1029,6 +1030,9 @@ import Testing
         #expect(files.currentFormat == .rtf)
         #expect(!files.isDirty)
         var document = try PadRichText.document(from: files.text)
+        // Inkkit's golden JSON is the document every host must read from this file.
+        let golden = try Data(contentsOf: try rtfFixture("\(fixtureName).json", in: root))
+        #expect(document == (try RichTextDocument(json: golden)))
         #expect(document == (try RTFConverter.document(fromRTF: original)))
         document.blocks.append(.paragraph(.init([.text("Added in PadPad", marks: [.underline])], align: .right)))
         files.text = try PadRichText.text(for: document)
@@ -1110,6 +1114,28 @@ import Testing
         workspace.open(picture)
         #expect(workspace.documents.isEmpty)
         #expect(workspace.document(at: picture) == nil)
+    }
+
+    @Test func refusedRTFAlertsNameWhatPadPadCantKeep() {
+        func message(_ kinds: [RTFConversionError.UnsupportedContent], during context: PadProblem.Context = .open) -> String? {
+            expectedAlert(RTFConversionError.unsupportedContent(kinds), during: context)?.message
+        }
+        #expect(message([.equation]) == "This document has equations that PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.largeTable]) == "This document has a very large table that PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.mergedTableCells, .footnote, .equation])
+                == "This document has merged table cells, footnotes, and equations that PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.attachment, .equation])
+                == "This document has pictures or other content PadPad can’t keep. Open it in TextEdit instead.")
+        #expect(message([.comment], during: .read)
+                == "It was changed elsewhere and now has comments that PadPad can’t keep. Open it in TextEdit instead.")
+        // Saving never shows a reading alert.
+        #expect(expectedAlert(RTFConversionError.unsupportedContent([.table]), during: .save)?.title == "Couldn’t save your changes")
+    }
+
+    @Test func newerLossCodesHaveSentences() {
+        for code in ["mark-spaces", "empty-line", "link-underline", "invalid-character"] {
+            #expect(PadFormatLoss.change(for: code) != PadFormatLoss.change(for: "unknown-code"), "\(code)")
+        }
     }
 
     @Test func externalEditsToRTFFilesNeverOverwriteOrLoseContent() throws {

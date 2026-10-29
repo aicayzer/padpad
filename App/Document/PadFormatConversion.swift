@@ -113,7 +113,11 @@ enum PadFormatLoss {
         case "list-start": "Numbered lists that start at 0 start at 1."
         case "list-item-blocks": "List items with several paragraphs become one paragraph."
         case "list-depth": "Lists nested more than 9 levels deep are flattened."
+        case "link-underline": "Underlined links lose their underline."
+        case "invalid-character": "Characters RTF can’t store become replacement characters (�)."
         case "alignment": "Centered, right-aligned and justified text becomes left-aligned."
+        case "mark-spaces": "Spaces at the edges of underlined, struck-through or linked text lose that formatting."
+        case "empty-line": "Lines with only a line break become empty paragraphs, and empty paragraphs at the end are removed."
         default: "Some formatting is removed."
         }
     }

@@ -138,11 +138,12 @@ enum PadProblem: Equatable {
         guard context == .open || context == .read else { return nil }
         let changed = context == .read
         switch error {
-        case .unsupportedContent:
+        case .unsupportedContent(let kinds):
+            let content = unsupportedContent(kinds)
             return .alert(PadAlert(title: changed ? "PadPad can’t reload this document" : "PadPad can’t open this document",
                                    message: changed
-                                       ? "It was changed elsewhere and now has pictures or other content PadPad can’t keep. Open it in TextEdit instead."
-                                       : "This document has pictures or other content PadPad can’t keep. Open it in TextEdit instead."))
+                                       ? "It was changed elsewhere and now has \(content) PadPad can’t keep. Open it in TextEdit instead."
+                                       : "This document has \(content) PadPad can’t keep. Open it in TextEdit instead."))
         case .notRTF:
             return .alert(PadAlert(title: changed ? "This file is no longer an RTF document" : "This file isn’t an RTF document",
                                    message: "It has the .rtf extension but contains another format. Open it in TextEdit instead."))
@@ -152,6 +153,28 @@ enum PadProblem: Equatable {
         case .invalidDocument, .writeFailed:
             return nil
         }
+    }
+
+    /// Names what the converter refused. Pictures lead, since they are the most common reason.
+    private static func unsupportedContent(_ kinds: [RTFConversionError.UnsupportedContent]) -> String {
+        if kinds.isEmpty || kinds.contains(.attachment) { return "pictures or other content" }
+        let names = kinds.map { kind in
+            switch kind {
+            case .attachment: "pictures"
+            case .table: "tables"
+            case .mergedTableCells: "merged table cells"
+            case .nestedTable: "tables inside tables"
+            case .listInTableCell: "lists inside tables"
+            case .headerOrFooter: "headers or footers"
+            case .footnote: "footnotes"
+            case .comment: "comments"
+            case .equation: "equations"
+            case .largeTable: "a very large table"
+            }
+        }
+        let list = names.count < 3 ? names.joined(separator: " and ")
+            : names.dropLast().joined(separator: ", ") + ", and " + names.last!
+        return list + " that"
     }
 
     private static func classify(_ code: CocoaError.Code, during context: Context) -> PadProblem? {

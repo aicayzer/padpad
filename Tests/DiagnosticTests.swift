@@ -1,0 +1,173 @@
+import AppKit
+import Foundation
+import Testing
+@testable import Pad
+
+@MainActor
+@Suite struct DiagnosticTests {
+    private func fixture() -> (UserDefaults, URL, String) {
+        let suite = "pad-diagnostics-tests-\(UUID().uuidString)"
+        let url = FileManager.default.temporaryDirectory.appending(path: suite).appending(path: "report.json")
+        return (UserDefaults(suiteName: suite)!, url, suite)
+    }
+
+    @Test func optInPersistsAndDisablingDeletesActivityAndCache() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        #expect(!diagnostics.enabled)
+        let source = DiagnosticSource()
+        diagnostics.register(source)
+        #expect(source.toggles == [false])
+        diagnostics.record(.error, scope: UUID(), format: .txt)
+        #expect(!FileManager.default.fileExists(atPath: cache.path))
+        diagnostics.enabled = true
+        #expect(PadDiagnostics(defaults: defaults, cacheURL: cache).enabled)
+        diagnostics.record(.error, scope: UUID(), format: .txt)
+        #expect(FileManager.default.fileExists(atPath: cache.path))
+        let restarted = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let resumed = try #require(await restarted.report())
+        #expect(String(decoding: resumed, as: UTF8.self).contains("previousIncident"))
+        diagnostics.enabled = false
+        #expect(source.toggles == [false, true, false])
+        #expect(!FileManager.default.fileExists(atPath: cache.path))
+        let raw = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: raw) as? [String: Any])
+        #expect((report["events"] as? [Any])?.isEmpty == true)
+        #expect(report["incident"] == nil)
+        #expect(report["previousIncident"] == nil)
+        #expect(!PadDiagnostics(defaults: defaults, cacheURL: cache).enabled)
+    }
+
+    @Test func nativeHistoryIsBoundedAndReportDoesNotAskForWriting() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        let source = DiagnosticSource()
+        diagnostics.register(source)
+        let scope = UUID()
+        for _ in 0..<260 { diagnostics.record(.edit, scope: scope, format: .txt) }
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((report["events"] as? [Any])?.count == 200)
+        #expect(source.reportRequests == 1)
+        #expect(!String(decoding: data, as: UTF8.self).contains(DiagnosticSource.canary))
+        #expect(data.count <= PadDiagnostics.maximumBytes)
+    }
+
+    @Test func bridgeValidatorDropsWritingAndUnknownMetadataAtEveryLevel() throws {
+        var raw = DiagnosticSource.payload()
+        raw["presentation"] = ["fontFamily": DiagnosticSource.canary, "fontSize": 15, "fontWeight": 400,
+                               "fontStyle": "normal", "caretColor": DiagnosticSource.canary,
+                               "viewport": ["width": 700, "height": 400, "text": DiagnosticSource.canary],
+                               "caret": ["left": 10, "top": Double.infinity]]
+        let report = try #require(PadDiagnosticSanitizer.report(raw))
+        let data = try JSONSerialization.data(withJSONObject: report)
+        #expect(!String(decoding: data, as: UTF8.self).contains(DiagnosticSource.canary))
+        let events = try #require(report["events"] as? [[String: Any]])
+        #expect(events.count == 200)
+        #expect(events.last?["kind"] as? String == "preservation")
+        #expect(events.last?["reason"] as? String == "reopen-mismatch")
+        let incident = try #require(report["incident"] as? [String: Any])
+        #expect((incident["events"] as? [Any])?.count == 200)
+        #expect((incident["tail"] as? [Any])?.count == 40)
+        #expect(PadDiagnosticSanitizer.report(["schemaVersion": 2, "enabled": true]) == nil)
+    }
+
+    @Test func resetPreferencesDisablesDiagnostics() {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let settings = AppSettings(defaults: defaults, diagnosticCacheURL: cache)
+        settings.diagnostics.enabled = true
+        settings.diagnostics.record(.error, scope: UUID(), format: .txt)
+        #expect(FileManager.default.fileExists(atPath: cache.path))
+        settings.resetPreferences(from: nil)
+        #expect(!settings.diagnostics.enabled)
+        #expect(!defaults.bool(forKey: PadDiagnostics.preferenceKey))
+        #expect(!FileManager.default.fileExists(atPath: cache.path))
+    }
+
+    @Test func reportStaysAvailableWhenDocumentSnapshotsFail() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let workspace = PadWorkspace(settings: settings, defaults: defaults, presentsWindows: false,
+                                     defaultFolder: cache.deletingLastPathComponent())
+        var snapshots = 0
+        workspace.quickPad.editorSnapshot = {
+            snapshots += 1
+            throw PadMarkdownEditorError.composing
+        }
+        settings.diagnostics.enabled = true
+        #expect(await settings.diagnostics.report() != nil)
+        #expect(snapshots == 0)
+        settings.diagnostics.enabled = false
+    }
+
+    @Test func reportTrimsHistoryInsteadOfFailingWhenSeveralWindowsFillIt() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        let sources = (0..<4).map { _ in DiagnosticSource() }
+        for source in sources { diagnostics.register(source) }
+        let data = try #require(await diagnostics.report())
+        #expect(data.count <= PadDiagnostics.maximumBytes)
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(report["truncated"] as? Bool == true)
+        #expect((report["editors"] as? [Any])?.count == 4)
+    }
+
+    @Test func cachedReportIsSanitizedAgainOnRelaunch() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        defaults.set(true, forKey: PadDiagnostics.preferenceKey)
+        let raw: [String: Any] = ["schemaVersion": 1, "writing": DiagnosticSource.canary,
+                                 "engine": ["scope": UUID().uuidString, "report": DiagnosticSource.payload()]]
+        try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: raw).write(to: cache)
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let data = try #require(await diagnostics.report())
+        #expect(!String(decoding: data, as: UTF8.self).contains(DiagnosticSource.canary))
+        #expect(String(decoding: data, as: UTF8.self).contains("reopen-mismatch"))
+    }
+}
+
+@MainActor
+private final class DiagnosticSource: PadDiagnosticSource {
+    static let canary = "PRIVATE-WRITING-/private/document.md-DO-NOT-EXPORT"
+    let diagnosticScope = UUID()
+    var toggles: [Bool] = []
+    var reportRequests = 0
+    func setDiagnosticsEnabled(_ enabled: Bool) { toggles.append(enabled) }
+    func diagnosticReport() async -> [String: Any]? {
+        reportRequests += 1
+        return Self.payload()
+    }
+    static func payload() -> [String: Any] {
+        let event: [String: Any] = ["sequence": 1, "elapsedMs": 20, "kind": "preservation", "reason": "reopen-mismatch",
+                                    "code": "preservation", "message": canary, "key": canary, "data": canary,
+                                    "state": ["ready": true, "revision": 2, "format": "md", "generation": 3,
+                                              "composing": true, "pending": true, "documentId": canary, "text": canary]]
+        return ["schemaVersion": 1, "enabled": true, "sessionId": UUID().uuidString, "documentId": canary,
+                "events": Array(repeating: event, count: 220), "state": event["state"]!,
+                "incident": ["triggerSequence": 1, "events": Array(repeating: event, count: 220),
+                             "tail": Array(repeating: event, count: 50), "message": canary]]
+    }
+}

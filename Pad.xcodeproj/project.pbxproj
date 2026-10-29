@@ -39,12 +39,14 @@
 		52C93C566913D64AD4B6F467 /* OpensWindows.swift in Sources */ = {isa = PBXBuildFile; fileRef = E538FE74AA4DB07FF073916E /* OpensWindows.swift */; };
 		56B2968316BB77C15DB0AC99 /* OverlaySearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EF93D16D030F218B3225EE /* OverlaySearchField.swift */; };
 		61711F42020CAB18A7554B97 /* OnboardingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAE79ABF7E75FFB0C920CAE5 /* OnboardingUITests.swift */; };
+		638B9D6E74B587978BFA2C8F /* DiagnosticTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87C6511CC1BB791495B7E0DE /* DiagnosticTests.swift */; };
 		63D4BDA44B8FA2CCDDD0C4FC /* ScratchLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AABBBE4978556123DE2C134 /* ScratchLifecycleTests.swift */; };
 		6B6D46D5A693330673E58DE1 /* PadNamingSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D5F9400C1E9EF196E78434E /* PadNamingSettings.swift */; };
 		6E54CADE40A1A78094777606 /* PadOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1928D9C35CF545CF60727141 /* PadOnboardingView.swift */; };
 		713004856210BCA181389388 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 1C342CF42DD9556B1B21F222 /* KeyboardShortcuts */; };
 		72F23CF65A1E51473CA9B6F3 /* LoginItemSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAD0E2FE5F4ED346DE0AF7E3 /* LoginItemSettings.swift */; };
 		75D3DE4FDCE8B922A7171CE3 /* textedit-lists.rtf in Resources */ = {isa = PBXBuildFile; fileRef = ED6456969B9EC6388C18D7F1 /* textedit-lists.rtf */; };
+		782838186AA8C36E8617B8FC /* PadDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3933218709177C31EC002EB /* PadDiagnostics.swift */; };
 		78DA27E944E88B4AC9DAB68A /* textutil-html.rtf in Resources */ = {isa = PBXBuildFile; fileRef = F940B175409710711565F788 /* textutil-html.rtf */; };
 		79DA2F741F8A6787B6211D06 /* PadClipboardContents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37142D94F6F19C82476C63D0 /* PadClipboardContents.swift */; };
 		843CAB6918736F6D737324A2 /* PlainTextSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F090DDD7F891EC2078684A69 /* PlainTextSelectionTests.swift */; };
@@ -152,6 +154,7 @@
 		7C45A232524BE007CF795DE4 /* UITestLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestLaunch.swift; sourceTree = "<group>"; };
 		8139AD0B346BE81E776A4BD9 /* PadFormatConversion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadFormatConversion.swift; sourceTree = "<group>"; };
 		862FD4BCEA3FD573B9CCC820 /* SettingsEditingDismissal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsEditingDismissal.swift; sourceTree = "<group>"; };
+		87C6511CC1BB791495B7E0DE /* DiagnosticTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticTests.swift; sourceTree = "<group>"; };
 		8973E101DCBB6B34544E1C63 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		90E36659E3C210961D3A9E45 /* ClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardTests.swift; sourceTree = "<group>"; };
 		933726A377415C032B720BA9 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -162,6 +165,7 @@
 		9E1B5C7A78C823D421E25864 /* PadWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadWorkspace.swift; sourceTree = "<group>"; };
 		A2694A6E13E03EDC77FA2FD0 /* FilenameInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilenameInputTests.swift; sourceTree = "<group>"; };
 		A2D0C4EED67E39E80A31F86B /* PadMarkdownEditorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadMarkdownEditorController.swift; sourceTree = "<group>"; };
+		A3933218709177C31EC002EB /* PadDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadDiagnostics.swift; sourceTree = "<group>"; };
 		A999B97A56ADD25994D11B77 /* PadUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadUITests.swift; sourceTree = "<group>"; };
 		AF95AB478A482DA016A57CA9 /* textedit-layout.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "textedit-layout.json"; sourceTree = "<group>"; };
 		B89C30E859A54BC39F6D3B16 /* DocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentTests.swift; sourceTree = "<group>"; };
@@ -295,6 +299,7 @@
 			children = (
 				F130D4E74E9170781D810291 /* MarkdownInputBuffer.swift */,
 				37EF93D16D030F218B3225EE /* OverlaySearchField.swift */,
+				A3933218709177C31EC002EB /* PadDiagnostics.swift */,
 				A2D0C4EED67E39E80A31F86B /* PadMarkdownEditorController.swift */,
 				2270747D70C4E1146AEDFBCF /* PadMarkdownEditorView.swift */,
 				0392D340A7C705FD23E9B042 /* PadPlainTextEditorView.swift */,
@@ -330,6 +335,7 @@
 				7D1DF68C97321F0DAABA4D66 /* Fixtures */,
 				69F6DFB1B64DA301EA96E5E7 /* AlertRecorder.swift */,
 				90E36659E3C210961D3A9E45 /* ClipboardTests.swift */,
+				87C6511CC1BB791495B7E0DE /* DiagnosticTests.swift */,
 				B89C30E859A54BC39F6D3B16 /* DocumentTests.swift */,
 				7A5022E10846FC0482266233 /* EditingShortcutTests.swift */,
 				A2694A6E13E03EDC77FA2FD0 /* FilenameInputTests.swift */,
@@ -574,6 +580,7 @@
 				56B2968316BB77C15DB0AC99 /* OverlaySearchField.swift in Sources */,
 				9AF5F3D82CC644C13E8468A9 /* PadApp.swift in Sources */,
 				79DA2F741F8A6787B6211D06 /* PadClipboardContents.swift in Sources */,
+				782838186AA8C36E8617B8FC /* PadDiagnostics.swift in Sources */,
 				D56D42DE1FB158F6514486C4 /* PadDocument.swift in Sources */,
 				C2D3C0F1178FE34A3971584B /* PadFileWindow.swift in Sources */,
 				08C4CCDBFAEBCEA878B7136A /* PadFilename.swift in Sources */,
@@ -602,6 +609,7 @@
 			files = (
 				DCFBE509B829BBCBC711461B /* AlertRecorder.swift in Sources */,
 				4B0AFC9E3D06DD031A8969B5 /* ClipboardTests.swift in Sources */,
+				638B9D6E74B587978BFA2C8F /* DiagnosticTests.swift in Sources */,
 				269569C2B306932754F49196 /* DocumentTests.swift in Sources */,
 				BA1EC19F6B9F64C9F2D9D824 /* EditingShortcutTests.swift in Sources */,
 				4AA5982F109490D3B74FBED0 /* FilenameInputTests.swift in Sources */,

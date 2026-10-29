@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class AppSettings {
+    let diagnostics: PadDiagnostics
     private let defaults: UserDefaults
     private var quickPadWidthValue: Double
     var quickPadWidth: Double {
@@ -88,6 +89,7 @@ final class AppSettings {
     }
 
     func resetPreferences(from window: NSWindow?) {
+        diagnostics.reset()
         restoreEditorDefaults()
         appearance = .system
         accent = .standard
@@ -115,8 +117,9 @@ final class AppSettings {
     @ObservationIgnored private var activationCleanup: Task<Void, Never>?
     @ObservationIgnored private var requestedReactivation = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, diagnosticCacheURL: URL? = nil) {
         self.defaults = defaults
+        diagnostics = PadDiagnostics(defaults: defaults, cacheURL: diagnosticCacheURL)
         quickPadWidthValue = Self.dimension(defaults.object(forKey: "quickPadWidth") as? Double ?? 740, fallback: 740, range: 520...1200)
         quickPadHeightValue = Self.dimension(defaults.object(forKey: "quickPadHeight") as? Double ?? 480, fallback: 480, range: 320...2400)
         fileWindowWidthValue = Self.dimension(defaults.object(forKey: "fileWindowWidth") as? Double ?? 800, fallback: 800, range: 520...3000)

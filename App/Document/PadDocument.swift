@@ -42,6 +42,7 @@ enum PadUnsavedChangesDecision {
 @Observable
 final class PadDocument {
     enum Role { case quickPad, file }
+    let diagnosticScope = UUID()
     let role: Role
     var isQuickPad: Bool { role == .quickPad }
     @ObservationIgnored weak var workspace: PadWorkspace?
@@ -93,7 +94,9 @@ final class PadDocument {
     private(set) var startsInReadingMode = false
     private var pendingReadingDocumentID: UUID?
     private(set) var documentID = UUID()
-    var text = ""
+    var text = "" {
+        didSet { if currentFormat == .txt { recordDiagnostic(.edit) } }
+    }
     private(set) var savedText = ""
     var isActive = false
     var settingsPresented = false
@@ -289,6 +292,9 @@ final class PadDocument {
     func mountMarkdownEditor() {
         guard !onboarding.isPresented, currentFormat.usesEditor, markdownEditor == nil else { return }
         let editor = PadMarkdownEditorController()
+        editor.diagnosticScope = diagnosticScope
+        editor.diagnostics = appSettings?.diagnostics
+        appSettings?.diagnostics.register(editor)
         editor.onChanged = { [weak self] content, id in
             guard let self, self.documentID == id, self.currentFormat.usesEditor, !self.onboarding.isPresented else { return }
             self.text = content
@@ -375,12 +381,14 @@ final class PadDocument {
 
     private func captureLatestEditor() async -> Bool {
         guard !onboarding.isPresented, currentFormat.usesEditor, let editorSnapshot else { return true }
+        recordDiagnostic(.snapshot)
         let id = documentID
         panel?.prepareMarkdownSnapshot()
         do {
             let latest = try await editorSnapshot()
             guard id == documentID else { return false }
             text = latest ?? editorLoadedSource
+            recordDiagnostic(.snapshotSucceeded)
             return true
         } catch {
             report(error, during: .snapshot)
@@ -811,6 +819,7 @@ final class PadDocument {
     }
 
     private func saveCurrent() {
+        recordDiagnostic(.save)
         let namesFile = url == nil && pendingName == nil
         var observedBytes: Data?
         do {
@@ -823,6 +832,7 @@ final class PadDocument {
                     notice = "Saved"
                     error = nil
                     reportedReadFailure = nil
+                    recordDiagnostic(.saveSucceeded)
                     return
                 }
                 // Conversion finishes before the atomic write, so a failure never leaves partial bytes.
@@ -853,6 +863,7 @@ final class PadDocument {
             error = nil
             reportedReadFailure = nil
             updateTitle()
+            recordDiagnostic(.saveSucceeded)
         } catch { report(error, during: namesFile ? .nameFormat : .save, observedBytes: observedBytes) }
     }
 
@@ -1286,7 +1297,14 @@ final class PadDocument {
         }
     }
 
+    func recordDiagnostic(_ activity: PadDiagnostics.Activity) {
+        appSettings?.diagnostics.record(activity, scope: diagnosticScope, format: currentFormat)
+    }
+
     private func report(_ error: any Error, during context: PadProblem.Context, observedBytes: Data? = nil) {
+        appSettings?.diagnostics.record(.error, scope: diagnosticScope, format: currentFormat,
+                                        code: PadMarkdownEditorController.diagnosticCode(error))
+        if let editor = markdownEditor { appSettings?.diagnostics.captureIncident(from: editor) }
         notice = nil
         switch PadProblem(error, during: context) {
         case .message(let message):

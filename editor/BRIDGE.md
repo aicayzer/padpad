@@ -31,3 +31,11 @@ Markdown Source switches InkKit's editing mode in the existing document; it does
 RTF documents have no source mode, and their command state reports headings, quotes and code blocks as unavailable and the alignment commands as available; the Aa menu follows it. The host keymap binds underline to Mod-u in both formats.
 
 Print first captures current source, then awaits the scoped `printableSnapshot`, for Markdown and RTF alike. Its complete HTML includes print CSS and frozen inline image assets. A separate WebKit view waits for fonts and image decoding before presenting the native print panel, including macOS PDF options. Safe fallback warnings appear in the printable content. Snapshot, asset, rendering, and stale document failures stop printing and retain writing.
+
+## Local diagnostics
+
+Diagnostics are off by default. The native General settings preference calls `setDiagnosticsEnabled(boolean)` for every mounted editor. Disabling it clears engine listeners and history, native history, and the retained local report. Native TXT editing records only activity categories and counts.
+
+`diagnosticReport()` reads metadata independently of document snapshots, including during composition, pending work, or a refused edit. The native side validates schema version 1 and copies only known enums, booleans, bounded numbers, safe presentation fields, and random diagnostic IDs. It never exports source, filenames, paths, document IDs, input characters, link destinations, or arbitrary error messages. Refusals retain the structured error code and safe preservation reason.
+
+The native recorder keeps at most 200 activities. It retains one bounded report file for relaunch, and identifies windows with random local scopes. Copy Diagnostic Report explicitly puts JSON on the native pasteboard for manual sharing. Report generation does not save or rewrite the document, including unedited RTF files.

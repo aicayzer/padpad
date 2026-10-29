@@ -27,6 +27,24 @@ describe("native bridge facade", () => {
     facade.load("Selected words\r\n", 1, "doc");
   });
 
+  it("exports bounded metadata independently of source snapshots", () => {
+    const canary = "PRIVATE-WRITING-/private/document.md";
+    facade.setDiagnosticsEnabled(true);
+    facade.load(canary, 70, canary);
+    expect(facade.format("bold", null, 69)).toMatchObject({ commandError: "stale-document" });
+    const root = document.getElementById("editor")!;
+    root.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: canary }));
+    const report = facade.diagnosticReport();
+    expect(report).toMatchObject({ schemaVersion: 1, enabled: true });
+    expect(JSON.stringify(report)).not.toContain(canary);
+    expect(report.events.length).toBeLessThanOrEqual(200);
+    root.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: canary }));
+    facade.setDiagnosticsEnabled(false);
+    expect(facade.diagnosticReport()).toMatchObject({ enabled: false, events: [] });
+    expect(facade.diagnosticReport().incident).toBeUndefined();
+    facade.load("Selected words\r\n", 1, "doc");
+  });
+
   it("reports the document with its generation when it changes", () => {
     expect(posted.some((entry) => entry.type === "ready")).toBe(true);
     expect(facade.insertText("!", 1)).toBe(true);

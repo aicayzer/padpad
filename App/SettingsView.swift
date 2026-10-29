@@ -80,6 +80,7 @@ struct SettingsView: View {
     }
 
     private var general: some View {
+        @Bindable var diagnostics = settings.diagnostics
         @Bindable var settings = settings
         @Bindable var document = document
         return Form {
@@ -122,6 +123,19 @@ struct SettingsView: View {
                 if !settings.showInDock && !settings.menuBarItem, let shortcut {
                     Text("Open \(Bundle.main.displayName) with \(shortcut.description).")
                 }
+            }
+            Section {
+                Toggle("Record diagnostic activity", isOn: $diagnostics.enabled)
+                    .accessibilityIdentifier("recordDiagnosticActivity")
+                Button("Copy Diagnostic Report") {
+                    Task { await settings.diagnostics.copyReport() }
+                }
+                .accessibilityIdentifier("copyDiagnosticReport")
+                if let error = settings.diagnostics.exportError {
+                    Text(error).foregroundStyle(Color("ErrorColor"))
+                }
+            } header: { Text("Diagnostics") } footer: {
+                Text("Records editor activity on this Mac without your writing, filenames, or file paths. Keeps the latest report for the next launch. Copy a report to share it manually. Turning this off deletes recorded activity.")
             }
         }.formStyle(.grouped)
     }

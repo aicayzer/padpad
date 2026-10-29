@@ -251,9 +251,9 @@ describe("native bridge facade", () => {
     const changed = latest("changed");
     expect(changed).toMatchObject({ format: "rtf", generation: 20 });
     expect(changed.text).toBeUndefined();
-    expect(JSON.parse(changed.document).blocks[0].content.at(-1).text).toContain(
-      "!",
-    );
+    expect(
+      JSON.parse(changed.document).blocks[0].content.at(-1).text,
+    ).toContain("!");
     expect(facade.snapshot(20)).toMatchObject({ dirty: true });
   });
 
@@ -293,5 +293,30 @@ describe("native bridge facade", () => {
     expect(facade.convert("rtf", 23)).toMatchObject({
       snapshotError: "stale-document",
     });
+  });
+  it("exports bounded metadata independently of source snapshots", () => {
+    const canary = "PRIVATE-WRITING-/private/document.md";
+    facade.setDiagnosticsEnabled(true);
+    facade.load(canary, 70, canary);
+    expect(facade.format("bold", null, 69)).toMatchObject({
+      commandError: "stale-document",
+    });
+    const root = document.getElementById("editor")!;
+    root.dispatchEvent(
+      new CompositionEvent("compositionstart", { bubbles: true, data: canary }),
+    );
+    const report = facade.diagnosticReport();
+    expect(report).toMatchObject({ schemaVersion: 1, enabled: true });
+    expect(JSON.stringify(report)).not.toContain(canary);
+    expect(report.events.length).toBeLessThanOrEqual(200);
+    root.dispatchEvent(
+      new CompositionEvent("compositionend", { bubbles: true, data: canary }),
+    );
+    facade.setDiagnosticsEnabled(false);
+    expect(facade.diagnosticReport()).toMatchObject({
+      enabled: false,
+      events: [],
+    });
+    expect(facade.diagnosticReport().incident).toBeUndefined();
   });
 });

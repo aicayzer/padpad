@@ -41,6 +41,7 @@ final class PadWorkspace {
 
     func didFocus(_ document: PadDocument) {
         focusedDocument = document
+        document.recordDiagnostic(.focus)
     }
 
     func open(_ file: URL) {

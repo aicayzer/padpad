@@ -4,6 +4,7 @@ import {
   type ClipboardOutput,
   type ConvertedDocument,
   type DocumentInput,
+  type DiagnosticReport,
   type DocumentSnapshot,
   type FormatCommand,
   type FormatOptions,
@@ -58,6 +59,7 @@ const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
 type DocumentContext = { documentId: string; generation: number };
 let documentContext: DocumentContext | undefined;
+let diagnosticsReader: (() => DiagnosticReport) | undefined;
 const errorContexts = new WeakMap<InkKitError, DocumentContext>();
 const clipboardReplies = new Map<
   string,
@@ -156,6 +158,7 @@ const editor = await InkKitEditor.mount(
           code: error.code,
           source: error.code === "clipboard-unavailable" ? "clipboard" : "edit",
           message: error.message,
+          reason: diagnosticReason(error),
           ...context,
         });
     },
@@ -163,9 +166,21 @@ const editor = await InkKitEditor.mount(
   },
   { formats, textInput: { smartPunctuation: false } },
 );
+diagnosticsReader = () => editor.diagnosticReport();
+function diagnosticReason(error: InkKitError): string | undefined {
+  if (error.code !== "preservation") return undefined;
+  const report = diagnosticsReader?.();
+  const events = report?.events ?? [];
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index];
+    if (event && event.code === error.code && event.reason) return event.reason;
+  }
+  return undefined;
+}
+
 function guardedCommand<T>(
   action: () => T,
-): T | { commandError: string; message: string } {
+): T | { commandError: string; message: string; reason?: string } {
   try {
     return action();
   } catch (error) {
@@ -175,12 +190,19 @@ function guardedCommand<T>(
       error.code !== "destroyed" &&
       error.code !== "internal"
     )
-      return { commandError: error.code, message: error.message };
+      return {
+        commandError: error.code,
+        message: error.message,
+        reason: diagnosticReason(error),
+      };
     throw error;
   }
 }
 
 const facade = {
+  setDiagnosticsEnabled: (enabled: boolean) =>
+    editor.setDiagnosticsEnabled(enabled),
+  diagnosticReport: () => editor.diagnosticReport(),
   clipboardResponse(requestId: string, response: { error?: string }) {
     const reply = clipboardReplies.get(requestId);
     clipboardReplies.delete(requestId);
@@ -212,7 +234,11 @@ const facade = {
       return bridged(editor.snapshot(expectedGeneration));
     } catch (error) {
       if (error instanceof InkKitError)
-        return { snapshotError: error.code, message: error.message };
+        return {
+          snapshotError: error.code,
+          message: error.message,
+          reason: diagnosticReason(error),
+        };
       throw error;
     }
   },
@@ -223,7 +249,11 @@ const facade = {
       );
     } catch (error) {
       if (error instanceof InkKitError)
-        return { snapshotError: error.code, message: error.message };
+        return {
+          snapshotError: error.code,
+          message: error.message,
+          reason: diagnosticReason(error),
+        };
       throw error;
     }
   },
@@ -255,7 +285,11 @@ const facade = {
       };
     } catch (error) {
       if (error instanceof InkKitError)
-        return { snapshotError: error.code, message: error.message };
+        return {
+          snapshotError: error.code,
+          message: error.message,
+          reason: diagnosticReason(error),
+        };
       throw error;
     }
   },

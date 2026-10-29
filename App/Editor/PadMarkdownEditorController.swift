@@ -23,7 +23,12 @@ struct PadMarkdownEditorFeedback: Equatable {
 
 @MainActor
 @Observable
-final class PadMarkdownEditorController: NSObject {
+final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
+    var diagnosticScope = UUID()
+    var diagnosticGeneration: Int { generation }
+    @ObservationIgnored weak var diagnostics: PadDiagnostics?
+    @ObservationIgnored private var diagnosticsEnabled = false
+    @ObservationIgnored private var diagnosticsEpoch = 0
     private(set) var isReady = false
     private(set) var editingMode = "formatted"
     /// The loaded document's format, as InkKit's command state reports it.
@@ -84,7 +89,44 @@ final class PadMarkdownEditorController: NSObject {
 
     private var keyboardFocusRevision = 0
 
-    func keyboardFocusDidChange() { keyboardFocusRevision &+= 1 }
+    func keyboardFocusDidChange() {
+        keyboardFocusRevision &+= 1
+        diagnostics?.record(.focus, scope: diagnosticScope, format: documentFormat, generation: generation)
+    }
+
+    func setDiagnosticsEnabled(_ enabled: Bool) {
+        if diagnosticsEnabled != enabled { diagnosticsEpoch += 1 }
+        diagnosticsEnabled = enabled
+        guard pageReady else { return }
+        webView.evaluateJavaScript("window.editor.setDiagnosticsEnabled(\(enabled))", completionHandler: nil)
+    }
+
+    func diagnosticReport() async -> [String: Any]? {
+        guard diagnosticsEnabled, pageReady else { return nil }
+        let expectedGeneration = generation
+        let expectedEpoch = diagnosticsEpoch
+        let result = await PadDiagnosticReportRequest.collect { [weak self] finish in
+            self?.webView.evaluateJavaScript("window.editor.diagnosticReport()") { value, error in
+                finish(error == nil ? value as? [String: Any] : nil)
+            }
+        }
+        guard diagnosticsEnabled, diagnosticsEpoch == expectedEpoch,
+              generation == expectedGeneration, let result else { return nil }
+        return PadDiagnosticSanitizer.report(result)
+    }
+
+    static func diagnosticCode(_ error: any Error) -> String {
+        guard let error = error as? PadMarkdownEditorError else { return "native" }
+        switch error {
+        case .notReady: return "not-ready"
+        case .documentChanged: return "stale-document"
+        case .invalidResponse: return "invalid-response"
+        case .unavailable: return "unavailable"
+        case .composing: return "composition"
+        case .script: return "script"
+        case .snapshotRejected(let code, _): return PadDiagnosticSanitizer.code(code)
+        }
+    }
 
     var canPerformMenuCommands: Bool {
         // AppKit focus is not observable. The panel invalidates this projection
@@ -100,7 +142,12 @@ final class PadMarkdownEditorController: NSObject {
         configuration.preferences.isElementFullscreenEnabled = false
         webView = PadMarkdownWebView(frame: .zero, configuration: configuration)
         super.init()
-        inputBuffer.onInput = { [weak self] in self?.focus() }
+        inputBuffer.onInput = { [weak self] in
+            guard let self else { return }
+            self.diagnostics?.record(.buffer, scope: self.diagnosticScope, format: self.documentFormat,
+                                     generation: self.generation, count: self.inputBuffer.eventCount)
+            self.focus()
+        }
         (webView as? PadMarkdownWebView)?.onAttach = { [weak self] in self?.onReady() }
         configuration.userContentController.add(PadMarkdownMessageProxy(target: self), name: "host")
         configuration.userContentController.addUserScript(WKUserScript(source: """
@@ -137,6 +184,7 @@ final class PadMarkdownEditorController: NSObject {
 
     private func replace(_ source: String, format: PadFormat, documentID: UUID, reload: Bool) {
         generation += 1
+        diagnostics?.record(.load, scope: diagnosticScope, format: format, generation: generation)
         self.documentID = documentID
         activeMarks = []
         canUndo = false
@@ -212,6 +260,9 @@ final class PadMarkdownEditorController: NSObject {
         guard expectedGeneration == generation else { throw PadMarkdownEditorError.documentChanged }
         guard let payload = result as? [String: Any] else { throw PadMarkdownEditorError.invalidResponse }
         if let code = payload["snapshotError"] as? String {
+            diagnostics?.record(.refusal, scope: diagnosticScope, format: documentFormat, generation: generation,
+                                code: code, reason: payload["reason"] as? String)
+            diagnostics?.captureIncident(from: self)
             guard let message = payload["message"] as? String else { throw PadMarkdownEditorError.invalidResponse }
             switch code {
             case "not-ready", "stale-document", "composition", "operation-pending", "preservation":
@@ -338,6 +389,7 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     func enqueueInputs(_ inputs: [MarkdownInputBuffer.Input]) {
+        diagnostics?.record(.buffer, scope: diagnosticScope, format: documentFormat, generation: generation, count: inputs.count)
         pendingEvents.append(contentsOf: inputs)
         focus()
     }
@@ -528,6 +580,9 @@ final class PadMarkdownEditorController: NSObject {
     /// The bridge answers an edit that InkKit refused with `commandError`; the editor stays usable.
     private func commandRefusal(_ result: Any?) -> PadMarkdownEditorFeedback? {
         guard let payload = result as? [String: Any], let code = payload["commandError"] as? String else { return nil }
+        diagnostics?.record(.refusal, scope: diagnosticScope, format: documentFormat, generation: generation,
+                            code: code, reason: payload["reason"] as? String)
+        diagnostics?.captureIncident(from: self)
         return PadMarkdownEditorFeedback(code: code, source: .edit)
     }
 
@@ -565,6 +620,7 @@ final class PadMarkdownEditorController: NSObject {
         switch type {
         case "ready":
             pageReady = true
+            setDiagnosticsEnabled(diagnosticsEnabled)
             applyAccent()
             applyReadingWidth()
             call("setKeymap", json([
@@ -580,6 +636,7 @@ final class PadMarkdownEditorController: NSObject {
                   let documentID, message["documentId"] as? String == documentID.uuidString,
                   let format = loadedFormat, message["format"] as? String == format.rawValue,
                   let content = Self.content(of: message, format: format) else { return }
+            diagnostics?.record(.edit, scope: diagnosticScope, format: format, generation: generation)
             onChanged(content, documentID)
         case "commands":
             guard message["generation"] as? Int == generation,
@@ -631,6 +688,9 @@ final class PadMarkdownEditorController: NSObject {
                   let code = message["code"] as? String,
                   let rawSource = message["source"] as? String,
                   let source = PadMarkdownEditorFeedback.Source(rawValue: rawSource) else { return }
+            diagnostics?.record(.refusal, scope: diagnosticScope, format: documentFormat, generation: generation,
+                                code: code, reason: message["reason"] as? String)
+            diagnostics?.captureIncident(from: self)
             showFeedback(PadMarkdownEditorFeedback(code: code, source: source))
         case "error":
             report(PadMarkdownEditorError.script(message["message"] as? String ?? "Unknown error"))
@@ -644,6 +704,9 @@ final class PadMarkdownEditorController: NSObject {
     }
 
     private func report(_ error: any Error) {
+        diagnostics?.record(.error, scope: diagnosticScope, format: documentFormat, generation: generation,
+                            code: Self.diagnosticCode(error))
+        diagnostics?.captureIncident(from: self)
         failure = error
         isReady = false
         onError(error)
@@ -773,5 +836,39 @@ struct PadPrintScope {
         guard current?["generation"] as? Int == generation,
               current?["documentId"] as? String == documentID,
               current?["revision"] as? Int == revision else { throw PadMarkdownEditorError.documentChanged }
+    }
+}
+
+@MainActor
+final class PadDiagnosticReportRequest {
+    private var continuation: CheckedContinuation<Data?, Never>?
+    private var timeout: Task<Void, Never>?
+
+    private init(_ continuation: CheckedContinuation<Data?, Never>) {
+        self.continuation = continuation
+    }
+
+    static func collect(timeout: Duration = .seconds(2),
+                        evaluate: (@escaping @MainActor ([String: Any]?) -> Void) -> Void) async -> [String: Any]? {
+        let data: Data? = await withCheckedContinuation { continuation in
+            let request = PadDiagnosticReportRequest(continuation)
+            request.timeout = Task { @MainActor in
+                do { try await Task.sleep(for: timeout) } catch { return }
+                request.finish(nil)
+            }
+            evaluate { value in
+                let report = value.flatMap(PadDiagnosticSanitizer.report)
+                request.finish(report.flatMap { try? JSONSerialization.data(withJSONObject: $0) })
+            }
+        }
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    }
+
+    private func finish(_ result: Data?) {
+        guard let continuation else { return }
+        self.continuation = nil
+        timeout?.cancel()
+        timeout = nil
+        continuation.resume(returning: result)
     }
 }

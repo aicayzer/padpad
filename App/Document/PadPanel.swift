@@ -615,23 +615,40 @@ struct PadView: View {
                         .layoutPriority(1)
                     Spacer(minLength: 0)
                     if settings.showFormatToggle, files.isQuickPad, files.url == nil {
-                        Menu {
-                            ForEach(PadFormat.allCases) { format in
-                                Toggle(format.name, isOn: Binding(get: { files.currentFormat == format }, set: { chosen in
-                                    if chosen { Task { await files.changeFormat(to: format) } }
-                                }))
+                        if files.hasFormatChoices {
+                            Menu {
+                                ForEach(files.enabledFormats) { format in
+                                    if files.enabledFormats.contains(files.currentFormat) {
+                                        Toggle(format.name, isOn: Binding(get: { files.currentFormat == format }, set: { chosen in
+                                            if chosen { Task { await files.changeFormat(to: format) } }
+                                        }))
+                                    } else {
+                                        Button("Convert to \(format.name)…") {
+                                            Task { await files.changeFormat(to: format) }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Text(files.currentFormat.title)
                             }
-                        } label: {
+                            .menuStyle(.button)
+                            .menuIndicator(.hidden)
+                            .buttonStyle(PadFormatButtonStyle())
+                            .fixedSize()
+                            .accessibilityIdentifier("documentFormat")
+                            .accessibilityLabel(files.currentFormat.name)
+                            .accessibilityValue(files.currentFormat.title)
+                            .help("Change format")
+                        } else {
                             Text(files.currentFormat.title)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 24, minHeight: 16)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .accessibilityIdentifier("documentFormatLabel")
+                                .accessibilityLabel(files.currentFormat.name)
                         }
-                        .menuStyle(.button)
-                        .menuIndicator(.hidden)
-                        .buttonStyle(PadFormatButtonStyle())
-                        .fixedSize()
-                        .accessibilityIdentifier("documentFormat")
-                        .accessibilityLabel(files.currentFormat.name)
-                        .accessibilityValue(files.currentFormat.title)
-                        .help("Change format")
                     }
                 }
                 .padding(.horizontal, 10)

@@ -127,6 +127,57 @@ import Testing
     }
 
     @Test(arguments: [false, true])
+    func cancelingAConflictingSaveAcknowledgesOnlyTheObservedFile(_ saveAs: Bool) async throws {
+        let fixture = try MessageFixture()
+        defer { fixture.cleanUp() }
+        var presented: [PadAlert] = []
+        var close: (@MainActor (Bool) -> Void)?
+        let file = fixture.root.appending(path: "conflict.txt")
+        let document = fixture.document(presentAlert: { alert, _, completion in
+            presented.append(alert)
+            close = completion
+        }, selectSaveFile: { _, _ in file })
+        _ = try fixture.conflictingFile(in: document)
+        if saveAs { await document.saveAs() } else { document.save() }
+        #expect(presented == [PadError.changed.alert()])
+        close?(false)
+        document.refreshIfNeeded()
+        #expect(presented.count == 1, "Returning focus after Cancel must not repeat the same conflict")
+        #expect(document.alert == nil)
+        #expect(document.text == "local edit")
+        #expect(document.savedText == "original")
+        #expect(try String(contentsOf: file, encoding: .utf8) == "external edit")
+
+        document.save()
+        #expect(presented.count == 2, "An explicit save must still explain why it cannot overwrite the file")
+        // A different external write while the alert is open has not been acknowledged.
+        try Data("newer external edit".utf8).write(to: file)
+        close?(false)
+        document.refreshIfNeeded()
+        #expect(presented.count == 3)
+        #expect(document.alert == PadError.changed.alert())
+        close?(false)
+        document.refreshIfNeeded()
+        #expect(presented.count == 3)
+        #expect(!document.isBusy)
+        #expect(document.text == "local edit")
+        #expect(document.savedText == "original")
+        #expect(try String(contentsOf: file, encoding: .utf8) == "newer external edit")
+
+        document.text = document.savedText
+        let replacement = fixture.root.appending(path: "replacement.txt")
+        try Data("replacement original".utf8).write(to: replacement)
+        #expect(document.openDocument(replacement))
+        document.text = "replacement local edit"
+        try Data("newer external edit".utf8).write(to: replacement)
+        document.refreshIfNeeded()
+        #expect(presented.count == 4, "A different document must not inherit an acknowledged conflict")
+        close?(false)
+        #expect(document.text == "replacement local edit")
+        #expect(try String(contentsOf: replacement, encoding: .utf8) == "newer external edit")
+    }
+
+    @Test(arguments: [false, true])
     func alertActionRunsTheExistingSaveAsCommand(_ confirms: Bool) async throws {
         let fixture = try MessageFixture()
         defer { fixture.cleanUp() }

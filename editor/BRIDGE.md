@@ -2,6 +2,8 @@
 
 The app bootstrap consumes `@aicayzer/inkkit` and bundles its JavaScript and CSS into one offline HTML file. The native app owns document identity, generation, storage, appearance, and keyboard bindings. InkKit owns editing, preservation, tables, and clipboard conversion.
 
+The editor build copies Inkkit's license, notice and bundled dependency notices into `dist/licenses/`, together with Vite's generated notices for the host's bundled dependencies. The app build includes that directory beside `Editor/index.html`. Rebuild the page and notices together when updating Inkkit.
+
 ## Documents and snapshots
 
 The bootstrap mounts InkKit with `formats: ['md', 'rtf']`; plain text stays in the native text view. `load(source, generation, documentId, format)` and `reload(source, generation, documentId, format)` pass Markdown source, or for `rtf` the JSON text of a `RichTextDocument`. A reload in a different format is sent as a load. `snapshot(expectedGeneration)` returns the complete current document with `documentId`, `generation`, `revision`, `format`, and `dirty`: Markdown carries `text`, and RTF carries `document` as JSON text. Native validation requires the field that belongs to the loaded format. Unchanged content is a successful snapshot, and native code treats it as "keep the loaded source", so an unedited RTF file is never rewritten.

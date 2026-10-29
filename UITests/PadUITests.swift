@@ -262,8 +262,7 @@ final class PadUITests: XCTestCase {
         let settings = app.windows["com_apple_SwiftUI_Settings_window"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
         selectTab("Files", in: settings)
-        settings.buttons["saveFolderOptions"].click()
-        app.menuItems["Choose Folder…"].click()
+        settings.buttons["chooseSaveFolder"].click()
         let sheet = settings.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), app.debugDescription)
         let cancel = sheet.buttons["CancelButton"].firstMatch
@@ -590,7 +589,7 @@ final class PadUITests: XCTestCase {
         app.activate()
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         selectTab("Files", in: settings)
-        XCTAssertTrue(settings.buttons["saveFolderOptions"].firstMatch.isEnabled)
+        XCTAssertTrue(settings.buttons["chooseSaveFolder"].firstMatch.isEnabled)
         attach(settings.screenshot(), name: "Settings active again after Finder")
     }
 

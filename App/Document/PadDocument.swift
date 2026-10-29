@@ -1237,6 +1237,19 @@ final class PadDocument {
     }
 
     private func present(_ alert: PadAlert) {
+        // A file that fails to open has no window, and an alert without a window can open where nobody
+        // sees it. The alert becomes a sheet on the window the person is using, or on the quick pad,
+        // which stays busy, and so visible, until the alert closes.
+        // Only open problems happen without a window, so the host's Choose File action still fits.
+        if nativeWindow == nil, let workspace {
+            let active = workspace.activeDocument
+            let host = active !== self && active.nativeWindow?.isVisible == true ? active : workspace.quickPad
+            if host !== self {
+                if host.nativeWindow?.isVisible != true { host.show() }
+                host.present(alert)
+                return
+            }
+        }
         guard self.alert == nil else { return }
         self.alert = alert
         let window = nativeWindow?.isVisible == true ? nativeWindow : nil

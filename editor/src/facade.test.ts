@@ -33,10 +33,12 @@ describe("native bridge facade", () => {
     expect(latest("changed")).toMatchObject({
       generation: 1,
       documentId: "doc",
-      markdown: expect.stringContaining("!"),
+      format: "md",
+      text: expect.stringContaining("!"),
     });
-    expect(latest("changed").markdown).toBe(facade.snapshot(1).text);
-    expect(latest("changed").markdown.endsWith("\r\n")).toBe(true);
+    expect(latest("changed").document).toBeUndefined();
+    expect(latest("changed").text).toBe(facade.snapshot(1).text);
+    expect(latest("changed").text.endsWith("\r\n")).toBe(true);
   });
 
   it("offers every heading level and names the caret in the commands message", () => {
@@ -219,6 +221,77 @@ describe("native bridge facade", () => {
       source: "clipboard",
       generation: 10,
       documentId: "old-copy",
+    });
+  });
+  it("loads, edits and snapshots an RTF document as JSON text", () => {
+    const loaded = {
+      version: 1,
+      blocks: [
+        {
+          type: "paragraph",
+          align: "center",
+          content: [{ type: "text", text: "Rich", marks: [{ type: "bold" }] }],
+        },
+      ],
+    };
+    facade.load(JSON.stringify(loaded), 20, "rich", "rtf");
+    const clean = facade.snapshot(20);
+    expect(clean).toMatchObject({ format: "rtf", dirty: false });
+    expect(clean.text).toBeUndefined();
+    expect(JSON.parse(clean.document)).toEqual(loaded);
+    const state = latest("commands");
+    expect(state.format).toBe("rtf");
+    expect(state.commands.format.heading1).toBe(false);
+    expect(state.commands.format.quote).toBe(false);
+    expect(state.commands.format.codeBlock).toBe(false);
+    expect(state.commands.format.alignRight).toBe(true);
+    expect(state.commands.format.underline).toBe(true);
+    expect(facade.setEditingMode("source", 20)).toBe(false);
+    expect(facade.insertText("!", 20)).toBe(true);
+    const changed = latest("changed");
+    expect(changed).toMatchObject({ format: "rtf", generation: 20 });
+    expect(changed.text).toBeUndefined();
+    expect(JSON.parse(changed.document).blocks[0].content.at(-1).text).toContain(
+      "!",
+    );
+    expect(facade.snapshot(20)).toMatchObject({ dirty: true });
+  });
+
+  it("underlines with the host keymap in Markdown and RTF", () => {
+    facade.setKeymap({ underline: ["Mod-u"] });
+    facade.load("", 21, "underline-md");
+    expect(facade.keyDown({ key: "u", metaKey: true }, 21)).toBe(true);
+    facade.insertText("under", 21);
+    expect(facade.snapshot(21).text).toBe("<u>under</u>\n");
+    facade.load('{"version":1,"blocks":[]}', 22, "underline-rtf", "rtf");
+    expect(facade.keyDown({ key: "u", metaKey: true }, 22)).toBe(true);
+    facade.insertText("under", 22);
+    expect(JSON.parse(facade.snapshot(22).document)).toEqual({
+      version: 1,
+      blocks: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "under", marks: [{ type: "underline" }] },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("converts between Markdown and RTF and names what is lost", () => {
+    facade.load("# Title\n\nBody\n", 23, "convert");
+    const rich = facade.convert("rtf", 23);
+    expect(rich.format).toBe("rtf");
+    expect(rich.lost).toEqual([{ code: "heading", count: 1 }]);
+    expect(JSON.parse(rich.document).blocks).toHaveLength(2);
+    expect(facade.snapshot(23)).toMatchObject({ format: "md", dirty: false });
+    facade.load(rich.document, 24, "convert", "rtf");
+    const markdown = facade.convert("md", 24);
+    expect(markdown).toMatchObject({ format: "md", lost: [] });
+    expect(markdown.text).toContain("**Title**");
+    expect(facade.convert("rtf", 23)).toMatchObject({
+      snapshotError: "stale-document",
     });
   });
 });

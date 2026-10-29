@@ -2,6 +2,9 @@ import {
   InkKitEditor,
   InkKitError,
   type ClipboardOutput,
+  type ConvertedDocument,
+  type DocumentInput,
+  type DocumentSnapshot,
   type FormatCommand,
   type FormatOptions,
   type KeyInput,
@@ -19,6 +22,36 @@ function post(message: Record<string, unknown>): void {
     }
   ).webkit?.messageHandlers?.host;
   if (host) host.postMessage(message);
+}
+
+// Plain text stays in the native text view, so the editor offers Markdown and RTF.
+const formats = ["md", "rtf"] as const;
+type HostFormat = (typeof formats)[number];
+
+// RTF documents cross the bridge as JSON text, which the native side reads with InkKitRTF.
+function documentInput(
+  source: string,
+  generation: number,
+  documentId: string,
+  format: HostFormat,
+): DocumentInput<HostFormat> {
+  return format === "rtf"
+    ? { format, document: JSON.parse(source), generation, documentId }
+    : { format, text: source, generation, documentId };
+}
+function bridged(snapshot: DocumentSnapshot<HostFormat>) {
+  return snapshot.format === "rtf"
+    ? { ...snapshot, document: JSON.stringify(snapshot.document) }
+    : snapshot;
+}
+function bridgedConversion(converted: ConvertedDocument) {
+  return converted.format === "rtf"
+    ? {
+        format: converted.format,
+        document: JSON.stringify(converted.document),
+        lost: converted.lost,
+      }
+    : { format: converted.format, text: converted.text, lost: converted.lost };
 }
 
 const root = document.getElementById("editor");
@@ -91,11 +124,15 @@ const editor = await InkKitEditor.mount(
   root,
   {
     changed(snapshot) {
+      const { format, documentId, generation } = snapshot;
       post({
         type: "changed",
-        markdown: snapshot.text,
-        documentId: snapshot.documentId,
-        generation: snapshot.generation,
+        format,
+        ...(snapshot.format === "rtf"
+          ? { document: JSON.stringify(snapshot.document) }
+          : { text: snapshot.text }),
+        documentId,
+        generation,
       });
     },
     commandStateChanged(state) {
@@ -124,7 +161,7 @@ const editor = await InkKitEditor.mount(
     },
     clipboard: writeClipboard,
   },
-  { textInput: { smartPunctuation: false } },
+  { formats, textInput: { smartPunctuation: false } },
 );
 function guardedCommand<T>(
   action: () => T,
@@ -151,32 +188,39 @@ const facade = {
     else reply?.resolve();
   },
   load(
-    text: string,
+    source: string,
     nextGeneration: number,
     documentId = String(nextGeneration),
+    format: HostFormat = "md",
   ) {
-    editor.loadDocument({
-      text,
-      generation: nextGeneration,
-      documentId,
-      format: "md",
-    });
+    editor.loadDocument(
+      documentInput(source, nextGeneration, documentId, format),
+    );
   },
   reload(
-    text: string,
+    source: string,
     nextGeneration: number,
     documentId = String(nextGeneration),
+    format: HostFormat = "md",
   ) {
-    editor.reloadDocument({
-      text,
-      generation: nextGeneration,
-      documentId,
-      format: "md",
-    });
+    editor.reloadDocument(
+      documentInput(source, nextGeneration, documentId, format),
+    );
   },
   snapshot(expectedGeneration: number) {
     try {
-      return editor.snapshot(expectedGeneration);
+      return bridged(editor.snapshot(expectedGeneration));
+    } catch (error) {
+      if (error instanceof InkKitError)
+        return { snapshotError: error.code, message: error.message };
+      throw error;
+    }
+  },
+  convert(format: HostFormat, expectedGeneration: number) {
+    try {
+      return bridgedConversion(
+        editor.convertDocument(format, expectedGeneration),
+      );
     } catch (error) {
       if (error instanceof InkKitError)
         return { snapshotError: error.code, message: error.message };

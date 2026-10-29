@@ -16,8 +16,7 @@ packages:
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: "3.1.0"
-  # Until Inkkit 0.4.0 is published, test builds replace the next line with:
-  #   InkKitRTF: { path: _local/inkkit }
+  # Keep at the same version as @aicayzer/inkkit in editor/package.json.
   InkKitRTF: { url: https://github.com/aicayzer/inkkit, exactVersion: "0.4.0" }
 settings:
   base:

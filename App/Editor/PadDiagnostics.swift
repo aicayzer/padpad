@@ -6,6 +6,7 @@ import OSLog
 @MainActor
 protocol PadDiagnosticSource: AnyObject {
     var diagnosticScope: UUID { get }
+    var diagnosticGeneration: Int { get }
     func setDiagnosticsEnabled(_ enabled: Bool)
     func diagnosticReport() async -> [String: Any]?
 }
@@ -83,7 +84,7 @@ enum PadDiagnosticSanitizer {
             clean["marks"] = Array(marks.filter { ["strong", "emphasis", "inlineCode", "strike_through", "link", "highlight", "other"].contains($0) }.prefix(7))
         }
         if let family = raw["fontFamily"] as? String {
-            let allowed: Set<String> = ["system-ui", "-apple-system", "BlinkMacSystemFont", "sans-serif", "serif", "monospace", "ui-monospace", "SFMono-Regular", "SF Pro", "SF Pro Text", "Helvetica Neue", "Helvetica", "Arial", "Menlo", "Monaco", "Courier New"]
+            let allowed: Set<String> = ["system-ui", "ui-rounded", "Times New Roman", "Georgia", "-apple-system", "BlinkMacSystemFont", "sans-serif", "serif", "monospace", "ui-monospace", "SFMono-Regular", "SF Pro", "SF Pro Text", "Helvetica Neue", "Helvetica", "Arial", "Menlo", "Monaco", "Courier New"]
             let families = family.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
             clean["fontFamily"] = !families.isEmpty && families.count <= 12 && families.allSatisfy(allowed.contains) ? family : "other"
         }
@@ -121,12 +122,15 @@ final class PadDiagnostics {
     private var previousReport: [String: Any]?
     private var epoch = 0
     private var incidentRequest = 0
+    @ObservationIgnored private var cacheTask: Task<Void, Never>?
     private(set) var exportError: String?
     var enabled: Bool {
         didSet {
             guard enabled != oldValue else { return }
             defaults.set(enabled, forKey: Self.preferenceKey)
             epoch += 1
+            cacheTask?.cancel()
+            cacheTask = nil
             events.removeAll()
             latestEngine = nil
             nativeIncident = nil
@@ -134,7 +138,7 @@ final class PadDiagnostics {
             sessionID = UUID()
             sequence = 0
             started = ProcessInfo.processInfo.systemUptime
-            try? FileManager.default.removeItem(at: cacheURL)
+            deleteCache()
             for source in sources { source.value?.setDiagnosticsEnabled(enabled) }
         }
     }
@@ -153,12 +157,20 @@ final class PadDiagnostics {
 
     func reset() {
         enabled = false
+        cacheTask?.cancel()
+        cacheTask = nil
         events.removeAll()
         nativeIncident = nil
         latestEngine = nil
         previousReport = nil
         exportError = nil
-        try? FileManager.default.removeItem(at: cacheURL)
+        deleteCache()
+    }
+
+    private func deleteCache() {
+        guard FileManager.default.fileExists(atPath: cacheURL.path) else { return }
+        do { try FileManager.default.removeItem(at: cacheURL) }
+        catch { exportError = "Couldn’t delete local diagnostic activity. Reset PadPad to try again." }
     }
 
     func register(_ source: any PadDiagnosticSource) {
@@ -184,8 +196,8 @@ final class PadDiagnostics {
             nativeIncident = incident
         }
         if events.count > 200 { events.removeFirst(events.count - 200) }
-        if activity == .refusal || activity == .error || activity == .save || activity == .snapshot {
-            Self.logger.info("Editor \(activity.rawValue, privacy: .public) format=\(format.rawValue, privacy: .public) code=\(PadDiagnosticSanitizer.code(code), privacy: .public)")
+        if activity == .refusal || activity == .error || activity == .save || activity == .saveSucceeded || activity == .snapshot || activity == .snapshotSucceeded {
+            Self.logger.info("Editor \(activity.rawValue, privacy: .public) format=\(format.rawValue, privacy: .public) code=\(code.map { PadDiagnosticSanitizer.code($0) } ?? "none", privacy: .public)")
         }
         if activity == .refusal || activity == .error {
             if !["composition", "not-ready", "stale-document", "operation-pending"].contains(PadDiagnosticSanitizer.code(code)) {
@@ -193,18 +205,42 @@ final class PadDiagnostics {
             }
             persist(envelope())
         }
+        if nativeIncident != nil || latestEngine != nil { scheduleCacheRefresh() }
+    }
+
+    private func scheduleCacheRefresh() {
+        cacheTask?.cancel()
+        let expectedEpoch = epoch
+        let source = sources.compactMap(\.value).first { $0.diagnosticScope.uuidString == latestEngine?["scope"] as? String }
+        let expectedGeneration = source?.diagnosticGeneration
+        cacheTask = Task { [weak self, weak source] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard let self, self.enabled, self.epoch == expectedEpoch else { return }
+            if let source, source.diagnosticGeneration == expectedGeneration,
+               let raw = await source.diagnosticReport(), let report = PadDiagnosticSanitizer.report(raw),
+               !Task.isCancelled, self.enabled, self.epoch == expectedEpoch,
+               source.diagnosticGeneration == expectedGeneration {
+                self.latestEngine = ["scope": source.diagnosticScope.uuidString, "report": report]
+            }
+            guard !Task.isCancelled, self.enabled, self.epoch == expectedEpoch else { return }
+            self.persist(self.envelope())
+            self.cacheTask = nil
+        }
     }
 
     func captureIncident(from source: any PadDiagnosticSource) {
         guard enabled else { return }
         let expectedEpoch = epoch
+        let expectedGeneration = source.diagnosticGeneration
         incidentRequest += 1
         let expectedRequest = incidentRequest
         Task { [weak self, weak source] in
             guard let source, let raw = await source.diagnosticReport(), let report = PadDiagnosticSanitizer.report(raw), let self,
-                  self.enabled, self.epoch == expectedEpoch, self.incidentRequest == expectedRequest else { return }
+                  self.enabled, self.epoch == expectedEpoch, self.incidentRequest == expectedRequest,
+                  source.diagnosticGeneration == expectedGeneration else { return }
             self.latestEngine = ["scope": source.diagnosticScope.uuidString, "report": report]
             self.persist(self.envelope())
+            self.scheduleCacheRefresh()
         }
     }
 
@@ -216,8 +252,14 @@ final class PadDiagnostics {
             // The incident remains available after its window closes; current editors have separate scopes.
             var current: [[String: Any]] = []
             for source in sources.compactMap(\.value).suffix(4) {
-                if let raw = await source.diagnosticReport(), let report = PadDiagnosticSanitizer.report(raw) {
+                let expectedGeneration = source.diagnosticGeneration
+                let raw = await source.diagnosticReport()
+                guard enabled, epoch == expectedEpoch else { return nil }
+                if source.diagnosticGeneration == expectedGeneration, let raw, let report = PadDiagnosticSanitizer.report(raw) {
                     current.append(["scope": source.diagnosticScope.uuidString, "report": report])
+                    if self.latestEngine?["scope"] as? String == source.diagnosticScope.uuidString {
+                        self.latestEngine = ["scope": source.diagnosticScope.uuidString, "report": report]
+                    }
                 }
             }
             guard enabled, epoch == expectedEpoch else { return nil }
@@ -230,10 +272,10 @@ final class PadDiagnostics {
         return encoded(envelope())
     }
 
-    func copyReport() async {
+    func copyReport(to pasteboard: NSPasteboard = .general, writer: (([NSPasteboardWriting]) -> Bool)? = nil) async {
         guard let data = await report(), let text = String(data: data, encoding: .utf8) else { return }
-        NSPasteboard.general.clearContents()
-        if !NSPasteboard.general.setString(text, forType: .string) { exportError = "Couldn’t copy the diagnostic report. Try again." }
+        do { try PadClipboardContents(text: text).write(to: pasteboard, writer: writer) }
+        catch { exportError = "Couldn’t copy the diagnostic report. Try again." }
     }
 
     private func envelope() -> [String: Any] {

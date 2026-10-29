@@ -25,6 +25,7 @@ struct PadMarkdownEditorFeedback: Equatable {
 @Observable
 final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     var diagnosticScope = UUID()
+    var diagnosticGeneration: Int { generation }
     @ObservationIgnored weak var diagnostics: PadDiagnostics?
     @ObservationIgnored private var diagnosticsEnabled = false
     private(set) var isReady = false
@@ -627,6 +628,7 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
                   let documentID, message["documentId"] as? String == documentID.uuidString,
                   let format = loadedFormat, message["format"] as? String == format.rawValue,
                   let content = Self.content(of: message, format: format) else { return }
+            diagnostics?.record(.edit, scope: diagnosticScope, format: format, generation: generation)
             onChanged(content, documentID)
         case "commands":
             guard message["generation"] as? Int == generation,

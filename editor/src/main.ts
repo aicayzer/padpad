@@ -168,9 +168,14 @@ const editor = await InkKitEditor.mount(
 );
 diagnosticsReader = () => editor.diagnosticReport();
 function diagnosticReason(error: InkKitError): string | undefined {
-  const report = diagnosticsReader?.();
   if (error.code !== "preservation") return undefined;
-  return report?.events.findLast((entry) => entry.code === error.code && entry.reason)?.reason;
+  const report = diagnosticsReader?.();
+  const events = report?.events ?? [];
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index];
+    if (event && event.code === error.code && event.reason) return event.reason;
+  }
+  return undefined;
 }
 
 function guardedCommand<T>(
@@ -185,13 +190,18 @@ function guardedCommand<T>(
       error.code !== "destroyed" &&
       error.code !== "internal"
     )
-      return { commandError: error.code, message: error.message, reason: diagnosticReason(error) };
+      return {
+        commandError: error.code,
+        message: error.message,
+        reason: diagnosticReason(error),
+      };
     throw error;
   }
 }
 
 const facade = {
-  setDiagnosticsEnabled: (enabled: boolean) => editor.setDiagnosticsEnabled(enabled),
+  setDiagnosticsEnabled: (enabled: boolean) =>
+    editor.setDiagnosticsEnabled(enabled),
   diagnosticReport: () => editor.diagnosticReport(),
   clipboardResponse(requestId: string, response: { error?: string }) {
     const reply = clipboardReplies.get(requestId);
@@ -224,7 +234,11 @@ const facade = {
       return bridged(editor.snapshot(expectedGeneration));
     } catch (error) {
       if (error instanceof InkKitError)
-        return { snapshotError: error.code, message: error.message, reason: diagnosticReason(error) };
+        return {
+          snapshotError: error.code,
+          message: error.message,
+          reason: diagnosticReason(error),
+        };
       throw error;
     }
   },
@@ -235,7 +249,11 @@ const facade = {
       );
     } catch (error) {
       if (error instanceof InkKitError)
-        return { snapshotError: error.code, message: error.message, reason: diagnosticReason(error) };
+        return {
+          snapshotError: error.code,
+          message: error.message,
+          reason: diagnosticReason(error),
+        };
       throw error;
     }
   },
@@ -267,7 +285,11 @@ const facade = {
       };
     } catch (error) {
       if (error instanceof InkKitError)
-        return { snapshotError: error.code, message: error.message, reason: diagnosticReason(error) };
+        return {
+          snapshotError: error.code,
+          message: error.message,
+          reason: diagnosticReason(error),
+        };
       throw error;
     }
   },

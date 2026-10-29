@@ -81,6 +81,56 @@ import Testing
         #expect(PadDiagnosticSanitizer.report(["schemaVersion": 2, "enabled": true]) == nil)
     }
 
+    @Test func failedDiagnosticCopyRestoresTheClipboard() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        try PadClipboardContents(text: "Previous", html: "<p>Previous</p>").write(to: board)
+        await diagnostics.copyReport(to: board, writer: { _ in false })
+        #expect(board.string(forType: .string) == "Previous")
+        #expect(board.string(forType: .html) == "<p>Previous</p>")
+        #expect(diagnostics.exportError != nil)
+    }
+
+    @Test func cancellationDuringReportLeavesClipboardUntouched() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        let source = DiagnosticSource()
+        source.onReport = { diagnostics.enabled = false }
+        diagnostics.register(source)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        try PadClipboardContents(text: "Previous").write(to: board)
+        let count = board.changeCount
+        await diagnostics.copyReport(to: board)
+        #expect(board.string(forType: .string) == "Previous")
+        #expect(board.changeCount == count)
+    }
+
+    @Test func lateIncidentCaptureDoesNotAttachToANewerDocumentGeneration() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        let source = DiagnosticSource()
+        source.onReport = { [weak source] in source?.diagnosticGeneration += 1 }
+        diagnostics.register(source)
+        diagnostics.captureIncident(from: source)
+        for _ in 0..<20 { await Task.yield() }
+        #expect(source.reportRequests == 1)
+        source.onReport = nil
+        let data = try #require(await diagnostics.report())
+        let report = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(report["engine"] == nil)
+    }
+
     @Test func resetPreferencesDisablesDiagnostics() {
         let (defaults, cache, suite) = fixture()
         defer {
@@ -153,11 +203,14 @@ import Testing
 private final class DiagnosticSource: PadDiagnosticSource {
     static let canary = "PRIVATE-WRITING-/private/document.md-DO-NOT-EXPORT"
     let diagnosticScope = UUID()
+    var diagnosticGeneration = 0
     var toggles: [Bool] = []
     var reportRequests = 0
+    var onReport: (() -> Void)?
     func setDiagnosticsEnabled(_ enabled: Bool) { toggles.append(enabled) }
     func diagnosticReport() async -> [String: Any]? {
         reportRequests += 1
+        onReport?()
         return Self.payload()
     }
     static func payload() -> [String: Any] {

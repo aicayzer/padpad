@@ -156,8 +156,14 @@ final class PadDocument {
     private let selectSaveFile: (@MainActor (URL, String) async -> URL?)?
     private let resolveUnsavedChanges: (@MainActor () -> PadUnsavedChangesDecision)?
     private let presentAlert: PadAlert.Presenter
-    // Window focus rereads the file; an unchanged failure must not alert again on every focus.
-    private var reportedReadAlert: PadAlert?
+    private struct ReportedReadFailure: Equatable {
+        let documentID: UUID
+        let file: URL?
+        let alert: PadAlert
+        let bytes: Data?
+    }
+    // Returning focus after an alert must not repeat it for the same observed file contents.
+    private var reportedReadFailure: ReportedReadFailure?
 
     private static let floatingKey = "pad.floating"
     private static let formatKey = "pad.format"
@@ -661,7 +667,7 @@ final class PadDocument {
         replaceDraft(format: format, text: "")
         savedText = ""
         error = nil
-        reportedReadAlert = nil
+        reportedReadFailure = nil
         notice = nil
         dismissedAt = nil
         pendingName = nil
@@ -739,7 +745,7 @@ final class PadDocument {
             onboarding.dismiss()
             pendingName = nil
             error = nil
-            reportedReadAlert = nil
+            reportedReadFailure = nil
             notice = nil
             panel?.prepareReading()
             reloadEditor()
@@ -765,8 +771,10 @@ final class PadDocument {
 
     private func refreshCurrentFile() {
         guard let url else { return }
+        var observedBytes: Data?
         do {
             let bytes = try Data(contentsOf: url)
+            observedBytes = bytes
             if isDirty {
                 if currentFormat != .rtf, String(data: bytes, encoding: .utf8) == nil { throw PadError.encoding }
                 guard bytes == baseline else { throw PadError.changed }
@@ -782,7 +790,7 @@ final class PadDocument {
                 reloadEditor()
             }
             error = nil
-            reportedReadAlert = nil
+            reportedReadFailure = nil
         } catch {
             let failure = error as NSError
             // Only a confirmed missing file permits discarding a clean quick pad.
@@ -792,7 +800,7 @@ final class PadDocument {
                 resetDocument()
                 return
             }
-            report(error, during: .read)
+            report(error, during: .read, observedBytes: observedBytes)
         }
     }
 
@@ -804,13 +812,17 @@ final class PadDocument {
 
     private func saveCurrent() {
         let namesFile = url == nil && pendingName == nil
+        var observedBytes: Data?
         do {
             if let url {
-                guard try Data(contentsOf: url) == baseline else { throw PadError.changed }
+                let bytes = try Data(contentsOf: url)
+                observedBytes = bytes
+                guard bytes == baseline else { throw PadError.changed }
                 // Writing RTF restyles the whole file, so an unedited RTF file is never rewritten.
                 if currentFormat == .rtf, !isDirty {
                     notice = "Saved"
                     error = nil
+                    reportedReadFailure = nil
                     return
                 }
                 // Conversion finishes before the atomic write, so a failure never leaves partial bytes.
@@ -839,9 +851,9 @@ final class PadDocument {
                 notice = "Saved. Path copied."
             }
             error = nil
-            reportedReadAlert = nil
+            reportedReadFailure = nil
             updateTitle()
-        } catch { report(error, during: namesFile ? .nameFormat : .save) }
+        } catch { report(error, during: namesFile ? .nameFormat : .save, observedBytes: observedBytes) }
     }
 
     /// Switches an unsaved quick-pad draft to another format. Markdown and plain text keep the exact source;
@@ -961,6 +973,7 @@ final class PadDocument {
         }
         guard let destination, documentID == id else { return }
         let accessing = destination.startAccessingSecurityScopedResource()
+        var observedBytes: Data?
         do {
             guard let destinationFormat = PadFormat(rawValue: destination.pathExtension.lowercased()) else { throw PadError.unsupported }
             guard workspace?.document(at: destination, excluding: self) == nil else { throw PadError.nameExists }
@@ -968,9 +981,10 @@ final class PadDocument {
                 guard destinationFormat == targetFormat else { throw PadError.unsupported }
                 guard !FileManager.default.fileExists(atPath: destination.path) else { throw PadError.nameExists }
             }
-            if destination.standardizedFileURL == url?.standardizedFileURL,
-               try Data(contentsOf: destination) != baseline {
-                throw PadError.changed
+            if destination.standardizedFileURL == url?.standardizedFileURL {
+                let bytes = try Data(contentsOf: destination)
+                observedBytes = bytes
+                guard bytes == baseline else { throw PadError.changed }
             }
             let unchangedCopy = destinationFormat == previousFormat && content == savedText ? baseline : nil
             var converted = false
@@ -1005,12 +1019,12 @@ final class PadDocument {
                 advanceGeneratedNumber(after: number)
             }
             error = nil
-            reportedReadAlert = nil
+            reportedReadFailure = nil
             notice = "Saved"
             updateTitle()
         } catch {
             if accessing { destination.stopAccessingSecurityScopedResource() }
-            report(error, during: .saveAs)
+            report(error, during: .saveAs, observedBytes: observedBytes)
         }
     }
 
@@ -1222,6 +1236,7 @@ final class PadDocument {
     @discardableResult
     func rename(to input: String) -> Bool {
         guard !isBusy else { return false }
+        var observedBytes: Data?
         do {
             let fileExtension = url?.pathExtension ?? currentFormat.rawValue
             let stem = try PadFilename.validatedStem(input)
@@ -1230,7 +1245,9 @@ final class PadDocument {
                 let destination = source.deletingLastPathComponent().appending(path: name)
                 if destination != source {
                     guard canRenameInContainingFolder(source) else { throw PadError.renamePermission }
-                    guard try Data(contentsOf: source) == baseline else { throw PadError.changed }
+                    let bytes = try Data(contentsOf: source)
+                    observedBytes = bytes
+                    guard bytes == baseline else { throw PadError.changed }
                     // Exclusive rename prevents an existing destination from being replaced, including races.
                     let result = source.withUnsafeFileSystemRepresentation { sourcePath in
                         destination.withUnsafeFileSystemRepresentation { destinationPath in
@@ -1264,20 +1281,24 @@ final class PadDocument {
             updateTitle()
             return true
         } catch {
-            report(error, during: .rename)
+            report(error, during: .rename, observedBytes: observedBytes)
             return false
         }
     }
 
-    private func report(_ error: any Error, during context: PadProblem.Context) {
+    private func report(_ error: any Error, during context: PadProblem.Context, observedBytes: Data? = nil) {
         notice = nil
         switch PadProblem(error, during: context) {
         case .message(let message):
             self.error = message
         case .alert(let alert):
+            let failure = ReportedReadFailure(documentID: documentID, file: url?.standardizedFileURL,
+                                              alert: alert, bytes: observedBytes)
             if context == .read {
-                guard alert != reportedReadAlert else { return }
-                reportedReadAlert = alert
+                guard failure != reportedReadFailure else { return }
+                reportedReadFailure = failure
+            } else if (error as? PadError) == .changed, observedBytes != nil {
+                reportedReadFailure = failure
             }
             self.error = nil
             present(alert)

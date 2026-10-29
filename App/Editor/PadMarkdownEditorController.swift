@@ -841,26 +841,30 @@ struct PadPrintScope {
 
 @MainActor
 final class PadDiagnosticReportRequest {
-    private var continuation: CheckedContinuation<[String: Any]?, Never>?
+    private var continuation: CheckedContinuation<Data?, Never>?
     private var timeout: Task<Void, Never>?
 
-    private init(_ continuation: CheckedContinuation<[String: Any]?, Never>) {
+    private init(_ continuation: CheckedContinuation<Data?, Never>) {
         self.continuation = continuation
     }
 
     static func collect(timeout: Duration = .seconds(2),
                         evaluate: (@escaping @MainActor ([String: Any]?) -> Void) -> Void) async -> [String: Any]? {
-        await withCheckedContinuation { continuation in
+        let data: Data? = await withCheckedContinuation { continuation in
             let request = PadDiagnosticReportRequest(continuation)
             request.timeout = Task { @MainActor in
                 do { try await Task.sleep(for: timeout) } catch { return }
                 request.finish(nil)
             }
-            evaluate { request.finish($0) }
+            evaluate { value in
+                let report = value.flatMap(PadDiagnosticSanitizer.report)
+                request.finish(report.flatMap { try? JSONSerialization.data(withJSONObject: $0) })
+            }
         }
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
     }
 
-    private func finish(_ result: [String: Any]?) {
+    private func finish(_ result: Data?) {
         guard let continuation else { return }
         self.continuation = nil
         timeout?.cancel()

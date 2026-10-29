@@ -17,4 +17,7 @@ await copyFile(
 const { version } = JSON.parse(
   await readFile(new URL("../package.json", packageDist), "utf8"),
 );
-await writeFile("dist/editor-version.json", JSON.stringify({ editorVersion: version }));
+await writeFile(
+  "dist/editor-version.json",
+  JSON.stringify({ editorVersion: version }),
+);

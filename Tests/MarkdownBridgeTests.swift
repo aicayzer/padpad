@@ -14,6 +14,51 @@ struct MarkdownBridgeTests {
         override var canBecomeMain: Bool { false }
     }
 
+    @Test(arguments: [400.0, 740.0])
+    func compactFindAlignsFieldsWithoutTakingReplacementFocus(width: Double) async throws {
+        let activation = NSWorkspace.OpenConfiguration()
+        activation.activates = true
+        activation.addsToRecentItems = false
+        let running = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: activation)
+        try #require(running.processIdentifier == ProcessInfo.processInfo.processIdentifier)
+        let editor = PadMarkdownEditorController()
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 120),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: PadMarkdownFindBar(editor: editor))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 120)
+        window.contentView = host
+        editor.showingFind = true
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil; window.close() }
+        func fields(_ view: NSView) -> [OverlayTextField] {
+            if let field = view as? OverlayTextField { return [field] }
+            return view.subviews.flatMap(fields)
+        }
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(30))
+        let find = try #require(fields(host).first)
+        #expect(find.placeholderString == "Find")
+        #expect(find.currentEditor() != nil)
+        editor.showingReplacement = true
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(30))
+        host.layoutSubtreeIfNeeded()
+        let replacement = try #require(fields(host).first { $0.placeholderString == "Replace with" })
+        let first = find.convert(find.bounds, to: host)
+        let second = replacement.convert(replacement.bounds, to: host)
+        #expect(abs(first.minX - second.minX) < 1)
+        #expect(first.minX >= 0 && first.maxX <= width)
+        #expect(first.width > 80)
+        #expect(find.currentEditor() != nil)
+        #expect(!replacement.hasFocused)
+        #expect(window.makeFirstResponder(replacement))
+        #expect(replacement.currentEditor() != nil)
+        editor.dismissFind()
+        #expect(!editor.showingFind && !editor.showingReplacement && editor.searchText.isEmpty)
+    }
+
     @Test func firstContentClickIntoReadyBackgroundDocumentKeepsEditingFocus() async throws {
         let suite = "pad-background-click-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

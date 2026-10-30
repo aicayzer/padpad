@@ -319,4 +319,128 @@ describe("native bridge facade", () => {
     });
     expect(facade.diagnosticReport().incident).toBeUndefined();
   });
+  it("counts and navigates matches without stealing the host field, then replaces and undoes", async () => {
+    facade.load("Garden one. Garden two. Garden three.\r\n", 80, "find");
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    expect(facade.find("garden", 80)).toBe(true);
+    expect(latest("searchState")).toMatchObject({
+      query: "garden",
+      current: 1,
+      total: 3,
+      documentId: "find",
+      generation: 80,
+    });
+    expect(facade.find("garden", 80, -1)).toBe(true);
+    expect(latest("searchState").current).toBe(3);
+    facade.find("garden", 80, 1);
+    expect(latest("searchState").current).toBe(1);
+    expect(document.activeElement).toBe(field);
+    facade.replace("garden", "Park", 80);
+    expect(latest("searchState")).toMatchObject({ current: 1, total: 2 });
+    expect(facade.replaceAll("garden", "Park", 80)).toBe(2);
+    expect(latest("searchState")).toMatchObject({ current: 0, total: 0 });
+    expect(facade.snapshot(80).text).toBe(
+      "Park one. Park two. Park three.\r\n",
+    );
+    facade.undo(80);
+    await Promise.resolve();
+    expect(latest("searchState").total).toBe(2);
+    field.remove();
+  });
+
+  it("resets find on a new document and refreshes counts across source mode", () => {
+    facade.load("**garden** and garden", 81, "modes");
+    facade.find("**", 81);
+    expect(latest("searchState").total).toBe(0);
+    facade.setEditingMode("source", 81);
+    expect(latest("searchState").total).toBe(2);
+    facade.find("", 81);
+    expect(latest("searchState")).toMatchObject({ query: "", total: 0 });
+    facade.load("new garden", 82, "new-document");
+    expect(latest("searchState")).toMatchObject({
+      query: "",
+      current: 0,
+      total: 0,
+      generation: 82,
+    });
+    expect(facade.find("garden", 81)).toMatchObject({
+      commandError: "stale-document",
+    });
+    expect(latest("searchState").generation).toBe(82);
+  });
+
+  it("finds and replaces rich text while preserving marks", () => {
+    const rich = {
+      version: 1,
+      blocks: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Garden Garden", marks: [{ type: "bold" }] },
+          ],
+        },
+      ],
+    };
+    facade.load(JSON.stringify(rich), 83, "rich-find", "rtf");
+    facade.find("garden", 83);
+    expect(latest("searchState")).toMatchObject({ current: 1, total: 2 });
+    expect(facade.replaceAll("garden", "Park", 83)).toBe(2);
+    const changed = JSON.parse(facade.snapshot(83).document);
+    expect(changed.blocks[0].content).toEqual([
+      { type: "text", text: "Park Park", marks: [{ type: "bold" }] },
+    ]);
+  });
+
+  it.each(["paste", "drop"])(
+    "declines image %s before inserting a placeholder and permits explicit plain text",
+    (type) => {
+      const generation = type === "paste" ? 84 : 85;
+      facade.load("Keep this", generation, "image-refusal");
+      const root = document.getElementById("editor")!;
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      const data = {
+        files: [new File(["fixture"], "picture.png", { type: "image/png" })],
+        items: [],
+        getData: () => "",
+      };
+      Object.defineProperty(
+        event,
+        type === "paste" ? "clipboardData" : "dataTransfer",
+        { value: data },
+      );
+      root.querySelector('[contenteditable="true"]')!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(facade.snapshot(generation).text).toBe("Keep this");
+      expect(latest("imagesDisabled")).toMatchObject({
+        documentId: "image-refusal",
+        generation,
+      });
+      facade.pasteAsPlainText("Copied text", generation);
+      expect(facade.snapshot(generation).text).toContain("Copied text");
+    },
+  );
+
+  it("declines mixed image HTML without inserting or rewriting its text", () => {
+    facade.load("Keep this", 86, "mixed-image");
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        files: [],
+        items: [],
+        getData: (kind: string) =>
+          kind === "text/html"
+            ? '<p>Copied text<img src="private.png"></p>'
+            : "Copied text",
+      },
+    });
+    document.getElementById("editor")!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(facade.snapshot(86).text).toBe("Keep this");
+    expect(latest("imagesDisabled")).toMatchObject({
+      documentId: "mixed-image",
+      generation: 86,
+    });
+  });
 });

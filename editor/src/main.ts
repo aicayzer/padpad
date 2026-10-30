@@ -13,6 +13,8 @@ import {
 } from "@aicayzer/inkkit";
 import "@aicayzer/inkkit/style.css";
 import "./style.css";
+import { PadFind } from "./find";
+import { declineImageInput } from "./image-input";
 
 function post(message: Record<string, unknown>): void {
   const host = (
@@ -59,6 +61,30 @@ const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
 type DocumentContext = { documentId: string; generation: number };
 let documentContext: DocumentContext | undefined;
+let finder: PadFind | undefined;
+let refreshScheduled = false;
+function refreshFind(): void {
+  if (refreshScheduled) return;
+  refreshScheduled = true;
+  queueMicrotask(() => {
+    refreshScheduled = false;
+    if (!finder || !documentContext) return;
+    try {
+      finder.refresh(documentContext.generation);
+    } catch (error) {
+      if (
+        !(error instanceof InkKitError) ||
+        ![
+          "not-ready",
+          "stale-document",
+          "composition",
+          "operation-pending",
+        ].includes(error.code)
+      )
+        throw error;
+    }
+  });
+}
 let diagnosticsReader: (() => DiagnosticReport) | undefined;
 const errorContexts = new WeakMap<InkKitError, DocumentContext>();
 const clipboardReplies = new Map<
@@ -143,6 +169,7 @@ const editor = await InkKitEditor.mount(
         generation: state.generation,
       };
       post({ type: "commands", ...state });
+      refreshFind();
     },
     openLink(href) {
       post({ type: "openLink", href });
@@ -166,6 +193,12 @@ const editor = await InkKitEditor.mount(
   },
   { formats, textInput: { smartPunctuation: false } },
 );
+finder = new PadFind(editor, (state) =>
+  post({ type: "searchState", ...state }),
+);
+declineImageInput(root, () => {
+  if (documentContext) post({ type: "imagesDisabled", ...documentContext });
+});
 diagnosticsReader = () => editor.diagnosticReport();
 function diagnosticReason(error: InkKitError): string | undefined {
   if (error.code !== "preservation") return undefined;
@@ -218,6 +251,7 @@ const facade = {
     editor.loadDocument(
       documentInput(source, nextGeneration, documentId, format),
     );
+    finder!.reset(nextGeneration);
   },
   reload(
     source: string,
@@ -228,6 +262,7 @@ const facade = {
     editor.reloadDocument(
       documentInput(source, nextGeneration, documentId, format),
     );
+    finder!.reset(nextGeneration);
   },
   snapshot(expectedGeneration: number) {
     try {
@@ -263,13 +298,17 @@ const facade = {
     return output;
   },
   setEditingMode: (mode: "source" | "formatted", expected: number) =>
-    guardedCommand(() => editor.setEditingMode(mode, expected)),
+    guardedCommand(() => {
+      const result = editor.setEditingMode(mode, expected);
+      finder!.restore(expected);
+      return result;
+    }),
   undo: (expected: number) => guardedCommand(() => editor.undo(expected)),
   redo: (expected: number) => guardedCommand(() => editor.redo(expected)),
   replace: (search: string, replacement: string, expected: number) =>
-    guardedCommand(() => editor.replace(search, replacement, expected)),
+    guardedCommand(() => finder!.replace(search, replacement, expected, false)),
   replaceAll: (search: string, replacement: string, expected: number) =>
-    guardedCommand(() => editor.replaceAll(search, replacement, expected)),
+    guardedCommand(() => finder!.replace(search, replacement, expected, true)),
   async printable(expectedGeneration: number) {
     try {
       const output = await editor.printableSnapshot(expectedGeneration);
@@ -307,8 +346,8 @@ const facade = {
     return { rect: rect ?? null };
   },
   focus: editor.focus.bind(editor),
-  find: (search: string, expected: number) =>
-    guardedCommand(() => editor.find(search, expected)),
+  find: (search: string, expected: number, direction = 0) =>
+    guardedCommand(() => finder!.find(search, expected, direction)),
   insertText: (text: string, expected: number) =>
     guardedCommand(() => editor.insertText(text, expected)),
   keyDown: (input: KeyInput, expected: number) =>

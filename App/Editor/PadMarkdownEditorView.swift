@@ -348,8 +348,10 @@ struct PadMarkdownFindBar: View {
         }
         .font(.system(size: 13))
         .foregroundStyle(.primary)
-        .frame(maxWidth: 440)
-        .padding(10)
+        .frame(maxWidth: 428)
+        .padding(8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Find and Replace")

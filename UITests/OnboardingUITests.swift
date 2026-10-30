@@ -87,7 +87,7 @@ final class OnboardingUITests: XCTestCase {
     }
 
     func testSkipAndFormatRoundTripRetainEditableMarkdownInDarkAppearance() throws {
-        let app = launchPad(appearance: "dark")
+        let app = launchPad(appearance: "dark", enabledFormats: "(md, txt)")
         defer { app.terminate() }
         summonIntroduction(app)
         attach(app.dialogs.firstMatch.screenshot(), name: "Native onboarding in Dark appearance")
@@ -291,7 +291,8 @@ final class OnboardingUITests: XCTestCase {
 
     private func launchPad(completed: Bool = false, format: String = "md",
                            appearance: String = "light", accent: String = "standard",
-                           globalShortcutEnabled: Bool = true, customAccent: String = "BEBAFC") -> XCUIApplication {
+                           globalShortcutEnabled: Bool = true, customAccent: String = "BEBAFC",
+                           enabledFormats: String = "(md, txt, rtf)") -> XCUIApplication {
         continueAfterFailure = false
         // Run this suite with PAD_APP_IDENTIFIER=me.cyzr.pad.onboardingqa. The target
         // resolves through XCUIApplication(), retaining compatibility with isolated app names.
@@ -299,6 +300,7 @@ final class OnboardingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-pad.onboardingCompleted", completed ? "YES" : "NO",
+            "-pad.enabledFormats", enabledFormats,
             "-pad.format", format, "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
             "-pad.reusePeriod", "60", "-showInDock", "YES", "-menuBarItem", "YES",
             "-appearance", appearance, "-accent", accent, "-customAccent", customAccent,

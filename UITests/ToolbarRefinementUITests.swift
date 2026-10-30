@@ -3,6 +3,31 @@ import XCTest
 
 @MainActor
 final class ToolbarRefinementUITests: XCTestCase {
+    func testSettingsGroupFormatsDraftsAndEditorControls() {
+        let app = launchPad(format: "txt", appearance: "light")
+        defer { app.terminate() }
+        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
+        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows["com_apple_SwiftUI_Settings_window"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.toolbars.buttons["Files"].click()
+        XCTAssertTrue(settings.staticTexts["Formats"].exists)
+        XCTAssertTrue(settings.staticTexts["Quick pad formats"].exists)
+        XCTAssertFalse(settings.switches["showFormatToggle"].exists)
+        XCTAssertLessThan(settings.popUpButtons["defaultFormat"].frame.minY,
+                          settings.switches["Save automatically"].frame.minY)
+        attach(settings.screenshot(), name: "Formats and draft defaults")
+        settings.toolbars.buttons["Editor"].click()
+        XCTAssertTrue(settings.switches["showFormatToggle"].exists)
+        XCTAssertFalse(settings.popUpButtons["defaultFormat"].exists)
+        attach(settings.screenshot(), name: "Editor text settings")
+        settings.toolbars.buttons["General"].click()
+        XCTAssertFalse(settings.switches["recordDiagnosticActivity"].exists)
+        settings.toolbars.buttons["About"].click()
+        XCTAssertTrue(settings.switches["recordDiagnosticActivity"].exists)
+        attach(settings.screenshot(), name: "About diagnostics")
+    }
+
     func testCompactTitleAndFormattingMenu() {
         let restoreClipboard = clipboardRestoration()
         defer { restoreClipboard() }
@@ -64,7 +89,7 @@ final class ToolbarRefinementUITests: XCTestCase {
         app.typeKey(",", modifierFlags: .command)
         let settings = app.windows["com_apple_SwiftUI_Settings_window"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        settings.toolbars.buttons["Files"].click()
+        settings.toolbars.buttons["Editor"].click()
         let option = settings.switches["showFormatToggle"].firstMatch
         XCTAssertTrue(option.waitForExistence(timeout: 5), app.debugDescription)
         option.click()
@@ -122,10 +147,12 @@ final class ToolbarRefinementUITests: XCTestCase {
         XCTAssertFalse(app.buttons["documentFormat"].exists)
         XCTAssertTrue(app.staticTexts["documentFormatLabel"].exists)
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        settings.toolbars.buttons["Editor"].click()
         let visibility = settings.switches["showFormatToggle"].firstMatch
         visibility.click()
         XCTAssertFalse(app.staticTexts["documentFormatLabel"].exists)
         visibility.click()
+        settings.toolbars.buttons["Files"].click()
         markdown.click()
         plainText.click()
         XCTAssertEqual(editor.value as? String, "Keep this draft é")

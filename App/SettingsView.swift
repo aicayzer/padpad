@@ -11,9 +11,6 @@ struct SettingsView: View {
     @State private var showingResetConfirmation = false
     @State private var resetting = false
     @FocusState private var editingDimension: String?
-#if DEBUG
-    @State private var formatLayout = 0
-#endif
 
     var body: some View {
         TabView {
@@ -161,6 +158,8 @@ struct SettingsView: View {
                     }
                     .disabled(!settings.limitTextWidth)
                 }
+                Toggle("Show format switch", isOn: $settings.showFormatToggle)
+                    .accessibilityIdentifier("showFormatToggle")
             } header: { Text("Text") } footer: {
                 Text("Keeps text centered in wider windows.")
             }
@@ -198,25 +197,16 @@ struct SettingsView: View {
     }
 
     private var files: some View {
-        @Bindable var settings = settings
         @Bindable var document = document
         return ScrollViewReader { scroll in
             Form {
-#if DEBUG
-                Section("Layout preview") {
-                    Picker("Enabled formats layout", selection: $formatLayout) {
-                        Text("Checklist").tag(0)
-                        Text("Switches").tag(1)
-                        Text("Selection").tag(2)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .tint(.primary)
-                }
-                .id("formatLayoutPreview")
-#endif
                 Section {
-                    enabledFormatControls
+                    formatChecklist
+                } header: { Text("Formats") } footer: {
+                    Text("Choose the formats available to new quick-pad drafts.")
+                }
+                .id("quickPadFormat")
+                Section {
                     Picker("Default format", selection: $document.format) {
                         ForEach(document.enabledFormats) { format in
                             Text("\(format.name) (.\(format.rawValue))").tag(format)
@@ -224,13 +214,6 @@ struct SettingsView: View {
                     }
                     .tint(.primary)
                     .accessibilityIdentifier("defaultFormat")
-                    Toggle("Show format switch", isOn: $settings.showFormatToggle)
-                        .accessibilityIdentifier("showFormatToggle")
-                } header: { Text("Quick pad format") } footer: {
-                    Text("Choose at least one format. The default applies to new drafts. Existing writing keeps its format.")
-                }
-                .id("quickPadFormat")
-                Section {
                     Toggle("Save automatically", isOn: $document.saveAutomatically)
                     Picker("Clear draft", selection: $document.reusePeriod) {
                         ForEach(PadReuse.allCases) { period in
@@ -275,51 +258,13 @@ struct SettingsView: View {
             .onAppear {
                 // The native filename field otherwise takes focus and scrolls the format controls out of view.
                 settingsWindow?.makeFirstResponder(nil)
-#if DEBUG
-                scroll.scrollTo("formatLayoutPreview", anchor: .top)
-#else
                 scroll.scrollTo("quickPadFormat", anchor: .top)
-#endif
             }
         }
-    }
-
-    @ViewBuilder private var enabledFormatControls: some View {
-#if DEBUG
-        if formatLayout == 1 {
-            ForEach(PadFormat.allCases) { format in
-                Toggle(format.name, isOn: formatBinding(format))
-                    .disabled(document.enabledFormats == [format])
-                    .accessibilityIdentifier("enableFormat-\(format.rawValue)")
-            }
-        } else if formatLayout == 2 {
-            ForEach(PadFormat.allCases) { format in
-                Button {
-                    document.setFormatEnabled(format, enabled: !document.enabledFormats.contains(format))
-                } label: {
-                    HStack {
-                        Text(format.name)
-                        Spacer()
-                        Image(systemName: "checkmark")
-                            .opacity(document.enabledFormats.contains(format) ? 1 : 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(document.enabledFormats == [format])
-                .accessibilityValue(document.enabledFormats.contains(format) ? "Enabled" : "Disabled")
-                .accessibilityIdentifier("enableFormat-\(format.rawValue)")
-            }
-        } else {
-            formatChecklist
-        }
-#else
-        formatChecklist
-#endif
     }
 
     private var formatChecklist: some View {
-        LabeledContent("Enabled formats") {
+        LabeledContent("Quick pad formats") {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(PadFormat.allCases) { format in
                     Toggle(format.name, isOn: formatBinding(format))

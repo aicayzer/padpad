@@ -867,6 +867,18 @@ final class PadDocument {
         } catch { report(error, during: namesFile ? .nameFormat : .save, observedBytes: observedBytes) }
     }
 
+    var nextFormat: PadFormat? {
+        guard !enabledFormats.isEmpty else { return nil }
+        guard let index = enabledFormats.firstIndex(of: currentFormat) else { return enabledFormats.first }
+        let next = enabledFormats[(index + 1) % enabledFormats.count]
+        return next == currentFormat ? nil : next
+    }
+
+    func cycleFormat() async {
+        guard let nextFormat else { return }
+        await changeFormat(to: nextFormat)
+    }
+
     /// Switches an unsaved quick-pad draft to another format. Markdown and plain text keep the exact source;
     /// RTF converts, and a conversion that loses something changes nothing until the person confirms it.
     func changeFormat(to target: PadFormat) async {

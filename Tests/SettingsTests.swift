@@ -72,7 +72,7 @@ import Testing
         #expect(isolated.accent == .standard)
     }
 
-    @Test(arguments: [AppAccess.dock, .menuBar, .both, .shortcutOnly])
+    @Test(arguments: [AppAccess.dock, .menuBar, .both, .hidden])
     func accessPreservesExistingVisibilityPreferences(_ access: AppAccess) {
         let suite = "pad-settings-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -85,20 +85,21 @@ import Testing
         #expect(settings.access == access)
         #expect(defaults.bool(forKey: "showInDock") == access.showInDock)
         #expect(defaults.bool(forKey: "menuBarItem") == access.menuBarItem)
-        #expect(!AppAccess.visibleChoices.contains(.shortcutOnly))
+        #expect(AppAccess.visibleChoices.contains(.hidden))
     }
 
-    @Test func accessCannotRemoveBothEntryPointsWithoutShortcut() {
+    @Test func hiddenAccessPersistsWithoutShortcut() {
         let suite = "pad-settings-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
 
-        settings.setAccess(.shortcutOnly, hasGlobalShortcut: false)
+        settings.setAccess(.hidden)
 
-        #expect(settings.access == .both)
-        #expect(defaults.object(forKey: "showInDock") == nil)
-        #expect(defaults.object(forKey: "menuBarItem") == nil)
+        #expect(settings.access == .hidden)
+        #expect(AppSettings(defaults: defaults).access == .hidden)
+        #expect(!defaults.bool(forKey: "showInDock"))
+        #expect(!defaults.bool(forKey: "menuBarItem"))
     }
 
     @Test func widthPresetsAndExplicitCustomChoicePersist() {

@@ -68,11 +68,11 @@ final class ToolbarRefinementUITests: XCTestCase {
         let option = settings.switches["showFormatToggle"].firstMatch
         XCTAssertTrue(option.waitForExistence(timeout: 5), app.debugDescription)
         option.click()
-        XCTAssertFalse(app.menuButtons["documentFormat"].exists)
+        XCTAssertFalse(app.buttons["documentFormat"].exists)
         XCTAssertEqual(editor.value as? String, source)
         option.click()
-        XCTAssertTrue(app.menuButtons["documentFormat"].exists)
-        XCTAssertEqual(app.menuButtons["documentFormat"].value as? String, "TXT")
+        XCTAssertTrue(app.buttons["documentFormat"].exists)
+        XCTAssertEqual(app.buttons["documentFormat"].value as? String, "TXT")
         editor.click()
         app.typeKey("a", modifierFlags: .command)
         app.typeText("Changed")
@@ -85,7 +85,7 @@ final class ToolbarRefinementUITests: XCTestCase {
         attach(app.dialogs.firstMatch.screenshot(), name: "TXT native undo and accented editing")
     }
 
-    func testEnabledFormatsPreserveDraftAndLimitFooterChoices() {
+    func testEnabledFormatsPreserveDraftAndCycleFooter() {
         let app = launchPad(format: "txt", appearance: "light", enabledFormats: "(md, txt, rtf)")
         defer { app.terminate() }
         let editor = app.textViews.firstMatch
@@ -96,8 +96,10 @@ final class ToolbarRefinementUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.toolbars.buttons["Files"].click()
         attach(settings.screenshot(), name: "Files settings initial default window")
+        settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -600)
         XCTAssertTrue(settings.buttons["chooseSaveFolder"].isHittable, settings.debugDescription)
         XCTAssertTrue(settings.staticTexts["Filename pattern"].isHittable, settings.debugDescription)
+        settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
         let markdown = settings.checkBoxes["enableFormat-md"].firstMatch
         let plainText = settings.checkBoxes["enableFormat-txt"].firstMatch
         let rtf = settings.checkBoxes["enableFormat-rtf"].firstMatch
@@ -117,7 +119,7 @@ final class ToolbarRefinementUITests: XCTestCase {
         attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling RTF")
         attach(settings.screenshot(), name: "Default Files settings with only Plain Text enabled")
         XCTAssertFalse(plainText.isEnabled, "The last enabled format stays selected")
-        XCTAssertFalse(app.menuButtons["documentFormat"].exists)
+        XCTAssertFalse(app.buttons["documentFormat"].exists)
         XCTAssertTrue(app.staticTexts["documentFormatLabel"].exists)
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
         let visibility = settings.switches["showFormatToggle"].firstMatch
@@ -130,15 +132,12 @@ final class ToolbarRefinementUITests: XCTestCase {
         XCTAssertFalse(markdown.isEnabled)
         XCTAssertTrue(settings.popUpButtons["defaultFormat"].value as? String == "Markdown (.md)")
         attach(settings.screenshot(), name: "Files settings with one enabled format and retained TXT draft")
-        let footer = app.menuButtons["documentFormat"].firstMatch
+        let footer = app.buttons["documentFormat"].firstMatch
         XCTAssertTrue(footer.exists)
         XCTAssertEqual(footer.value as? String, "TXT")
         footer.click()
-        XCTAssertTrue(app.menuItems["Convert to Markdown…"].exists)
-        XCTAssertFalse(app.menuItems["Plain Text"].exists)
-        XCTAssertFalse(app.menuItems["RTF"].exists)
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        expectValue("MD", in: footer)
+        XCTAssertFalse(app.menus.firstMatch.exists, "A footer click cycles directly without a menu")
         app.typeKey(",", modifierFlags: .command)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
         plainText.click()

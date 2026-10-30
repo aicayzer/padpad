@@ -11,13 +11,19 @@ import XCTest
 let sharedUITestLaunchArguments = ["-NSAutomaticInlinePredictionEnabled", "NO"]
 
 extension XCUIApplication {
-    /// Chooses a format from the quick pad's footer menu, such as "Plain Text".
+    /// Cycles the quick pad through its enabled formats.
     @MainActor func chooseFormat(_ name: String) {
-        let control = menuButtons["documentFormat"].firstMatch
+        let control = buttons["documentFormat"].firstMatch
         XCTAssertTrue(control.waitForExistence(timeout: 5), debugDescription)
-        control.click()
-        let item = menuItems[name].firstMatch
-        XCTAssertTrue(item.waitForExistence(timeout: 5), debugDescription)
-        item.click()
+        for _ in 0..<3 {
+            if control.label == name { return }
+            let previous = control.value as? String
+            control.click()
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (control.value as? String) != previous
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+        }
+        XCTAssertEqual(control.label, name)
     }
 }

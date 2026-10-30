@@ -96,7 +96,7 @@ final class AppSettings {
         customAccent = "BEBAFC"
         menuBarIcon = .mark
         showFormatToggle = true
-        setAccess(.both, hasGlobalShortcut: true, from: window)
+        setAccess(.both, from: window)
     }
 
     var showInDock: Bool { didSet { defaults.set(showInDock, forKey: "showInDock"); if !defersActivationPolicy { applyActivationPolicy() } } }
@@ -143,8 +143,7 @@ final class AppSettings {
 
     var access: AppAccess { AppAccess(showInDock: showInDock, menuBarItem: menuBarItem) }
 
-    func setAccess(_ access: AppAccess, hasGlobalShortcut: Bool, from window: NSWindow? = nil) {
-        guard access != .shortcutOnly || hasGlobalShortcut else { return }
+    func setAccess(_ access: AppAccess, from window: NSWindow? = nil) {
         cancelActivationTransition()
         defersActivationPolicy = window != nil
         // Establish the menu entry point before hiding the Dock icon.
@@ -266,9 +265,9 @@ final class AppSettings {
 }
 
 enum AppAccess: String, Identifiable {
-    case dock, menuBar, both, shortcutOnly
+    case dock, menuBar, both, hidden
 
-    static let visibleChoices: [AppAccess] = [.dock, .menuBar, .both]
+    static let visibleChoices: [AppAccess] = [.dock, .menuBar, .both, .hidden]
     var id: String { rawValue }
     var showInDock: Bool { self == .dock || self == .both }
     var menuBarItem: Bool { self == .menuBar || self == .both }
@@ -277,7 +276,7 @@ enum AppAccess: String, Identifiable {
         case .dock: "Dock"
         case .menuBar: "Menu bar"
         case .both: "Dock and menu bar"
-        case .shortcutOnly: "Shortcut only"
+        case .hidden: "Hidden"
         }
     }
 
@@ -286,7 +285,7 @@ enum AppAccess: String, Identifiable {
         case (true, true): self = .both
         case (true, false): self = .dock
         case (false, true): self = .menuBar
-        case (false, false): self = .shortcutOnly
+        case (false, false): self = .hidden
         }
     }
 }

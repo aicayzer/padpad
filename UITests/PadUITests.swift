@@ -575,7 +575,7 @@ final class PadUITests: XCTestCase {
             XCTAssertTrue(settings.staticTexts["Show or hide PadPad Dev"].firstMatch.waitForExistence(timeout: 5))
             attach(settings.screenshot(), name: "Settings Shortcuts \(mode)")
             selectTab("About", in: settings)
-            XCTAssertTrue(settings.staticTexts["A place for text and Markdown."].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(settings.staticTexts["A place for text, Markdown, and rich text."].firstMatch.waitForExistence(timeout: 5))
             XCTAssertFalse(settings.staticTexts["Open at login"].firstMatch.exists)
             attach(settings.screenshot(), name: "Settings About \(mode)")
         }

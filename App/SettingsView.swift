@@ -80,7 +80,6 @@ struct SettingsView: View {
     }
 
     private var general: some View {
-        @Bindable var diagnostics = settings.diagnostics
         @Bindable var settings = settings
         @Bindable var document = document
         return Form {
@@ -103,17 +102,14 @@ struct SettingsView: View {
             Section {
                 Toggle("Open at login", isOn: Binding(get: { login.enabled }, set: { enabled in Task { await login.setEnabled(enabled) } }))
                     .disabled(login.updating)
-                if login.status == .requiresApproval { Button("Allow in Login Items…") { login.openSystemSettings() } }
+                if login.status == .requiresApproval { Button("Allow in Login Items…") { login.openSystemSettings() }.tint(.primary) }
                 if let error = login.error { Text(error).foregroundStyle(Color("ErrorColor")) }
                 Toggle("Keep quick pad on top", isOn: $document.floating)
                 Picker("Open PadPad from", selection: Binding(
                     get: { settings.access },
-                    set: { settings.setAccess($0, hasGlobalShortcut: shortcut != nil, from: settingsWindow) }
+                    set: { settings.setAccess($0, from: settingsWindow) }
                 )) {
                     ForEach(AppAccess.visibleChoices) { Text($0.title).tag($0) }
-                    if settings.access == .shortcutOnly {
-                        Text(AppAccess.shortcutOnly.title).tag(AppAccess.shortcutOnly)
-                    }
                 }
                 .tint(.primary)
                 .accessibilityIdentifier("appAccess")
@@ -124,20 +120,7 @@ struct SettingsView: View {
                     Text("Open \(Bundle.main.displayName) with \(shortcut.description).")
                 }
             }
-            Section {
-                Toggle("Record diagnostic activity", isOn: $diagnostics.enabled)
-                    .accessibilityIdentifier("recordDiagnosticActivity")
-                Button("Copy Diagnostic Report") {
-                    Task { await settings.diagnostics.copyReport() }
-                }
-                .disabled(!diagnostics.enabled)
-                .accessibilityIdentifier("copyDiagnosticReport")
-                if let error = settings.diagnostics.exportError {
-                    Text(error).foregroundStyle(Color("ErrorColor"))
-                }
-            } header: { Text("Diagnostics") } footer: {
-                Text("Records editor activity on this Mac without your writing, filenames, or file paths. Keeps the latest report for the next launch. Copy a report to share it manually. Turning this off deletes recorded activity.")
-            }
+
         }.formStyle(.grouped)
     }
 
@@ -175,6 +158,8 @@ struct SettingsView: View {
                     }
                     .disabled(!settings.limitTextWidth)
                 }
+                Toggle("Show format switch", isOn: $settings.showFormatToggle)
+                    .accessibilityIdentifier("showFormatToggle")
             } header: { Text("Text") } footer: {
                 Text("Keeps text centered in wider windows.")
             }
@@ -212,24 +197,16 @@ struct SettingsView: View {
     }
 
     private var files: some View {
-        @Bindable var settings = settings
         @Bindable var document = document
         return ScrollViewReader { scroll in
             Form {
                 Section {
-                    LabeledContent("Enabled formats") {
-                        HStack(spacing: 12) {
-                            ForEach(PadFormat.allCases) { format in
-                                Toggle(format.name, isOn: Binding(
-                                    get: { document.enabledFormats.contains(format) },
-                                    set: { document.setFormatEnabled(format, enabled: $0) }
-                                ))
-                                .toggleStyle(.checkbox)
-                                .disabled(document.enabledFormats == [format])
-                                .accessibilityIdentifier("enableFormat-\(format.rawValue)")
-                            }
-                        }
-                    }
+                    formatChecklist
+                } header: { Text("Formats") } footer: {
+                    Text("Choose the formats available to new quick-pad drafts.")
+                }
+                .id("quickPadFormat")
+                Section {
                     Picker("Default format", selection: $document.format) {
                         ForEach(document.enabledFormats) { format in
                             Text("\(format.name) (.\(format.rawValue))").tag(format)
@@ -237,14 +214,8 @@ struct SettingsView: View {
                     }
                     .tint(.primary)
                     .accessibilityIdentifier("defaultFormat")
-                    Toggle("Show format switch", isOn: $settings.showFormatToggle)
-                        .accessibilityIdentifier("showFormatToggle")
-                } header: { Text("Quick pad format") } footer: {
-                    Text("Choose at least one format. The default applies to new drafts. Existing writing keeps its format.")
-                }
-                .id("quickPadFormat")
-                Section {
                     Toggle("Save automatically", isOn: $document.saveAutomatically)
+                        .accessibilityIdentifier("saveAutomatically")
                     Picker("Clear draft", selection: $document.reusePeriod) {
                         ForEach(PadReuse.allCases) { period in
                             Text(period.title).tag(period)
@@ -259,6 +230,7 @@ struct SettingsView: View {
                     LabeledContent("Folder") {
                         Text(document.folder.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).help(document.folder.path)
                         Button("Choose…") { Task { await document.chooseFolder(parent: settingsWindow) } }
+                            .tint(.primary)
                             .accessibilityIdentifier("chooseSaveFolder")
                             .accessibilityLabel("Choose save folder")
                     }
@@ -292,6 +264,24 @@ struct SettingsView: View {
         }
     }
 
+    private var formatChecklist: some View {
+        LabeledContent("Quick pad formats") {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(PadFormat.allCases) { format in
+                    Toggle(format.name, isOn: formatBinding(format))
+                        .toggleStyle(.checkbox)
+                        .disabled(document.enabledFormats == [format])
+                        .accessibilityIdentifier("enableFormat-\(format.rawValue)")
+                }
+            }
+        }
+    }
+
+    private func formatBinding(_ format: PadFormat) -> Binding<Bool> {
+        Binding(get: { document.enabledFormats.contains(format) },
+                set: { document.setFormatEnabled(format, enabled: $0) })
+    }
+
     private var draftExplanation: String {
         if document.saveAutomatically {
             return "Quick pad saves on close or when switching apps. Save opened files manually."
@@ -303,7 +293,8 @@ struct SettingsView: View {
     }
 
     private var about: some View {
-        Form {
+        @Bindable var diagnostics = settings.diagnostics
+        return Form {
             Section {
                 HStack(spacing: 12) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath))
@@ -312,8 +303,23 @@ struct SettingsView: View {
                         .accessibilityHidden(true)
                     LabeledContent(Bundle.main.displayName, value: "\(Bundle.main.shortVersion) (\(Bundle.main.buildNumber))")
                 }
-                Text("A place for text and Markdown.")
+                Text("A place for text, Markdown, and rich text.")
                     .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Record diagnostic activity", isOn: $diagnostics.enabled)
+                    .accessibilityIdentifier("recordDiagnosticActivity")
+                Button("Copy Diagnostic Report") {
+                    Task { await settings.diagnostics.copyReport() }
+                }
+                .tint(.primary)
+                .disabled(!diagnostics.enabled)
+                .accessibilityIdentifier("copyDiagnosticReport")
+                if let error = settings.diagnostics.exportError {
+                    Text(error).foregroundStyle(Color("ErrorColor"))
+                }
+            } header: { Text("Diagnostics") } footer: {
+                Text("Records activity locally, without your writing.")
             }
             Section {
                 Link("Website", destination: URL(string: "https://padpad.cyzr.me")!)
@@ -356,8 +362,6 @@ struct SettingsView: View {
             Section("Global shortcut") {
                 KeyboardShortcuts.Recorder("Show or hide \(Bundle.main.displayName)", name: .pad) { value in
                     shortcut = value
-                    // Keep an entry point when the final global shortcut is removed.
-                    if value == nil && !settings.showInDock && !settings.menuBarItem { settings.menuBarItem = true }
                 }
                 .shortcutValidation { document.editingShortcuts.validateGlobal($0) }
             }

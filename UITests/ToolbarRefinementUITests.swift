@@ -3,6 +3,31 @@ import XCTest
 
 @MainActor
 final class ToolbarRefinementUITests: XCTestCase {
+    func testSettingsGroupFormatsDraftsAndEditorControls() {
+        let app = launchPad(format: "txt", appearance: "light")
+        defer { app.terminate() }
+        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
+        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows["com_apple_SwiftUI_Settings_window"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.toolbars.buttons["Files"].click()
+        XCTAssertTrue(settings.staticTexts["Formats"].exists)
+        XCTAssertTrue(settings.staticTexts["Quick pad formats"].exists)
+        XCTAssertFalse(settings.switches["showFormatToggle"].exists)
+        XCTAssertLessThan(settings.popUpButtons["defaultFormat"].frame.minY,
+                          settings.switches["saveAutomatically"].frame.minY)
+        attach(settings.screenshot(), name: "Formats and draft defaults")
+        settings.toolbars.buttons["Editor"].click()
+        XCTAssertTrue(settings.switches["showFormatToggle"].exists)
+        XCTAssertFalse(settings.popUpButtons["defaultFormat"].exists)
+        attach(settings.screenshot(), name: "Editor text settings")
+        settings.toolbars.buttons["General"].click()
+        XCTAssertFalse(settings.switches["recordDiagnosticActivity"].exists)
+        settings.toolbars.buttons["About"].click()
+        XCTAssertTrue(settings.switches["recordDiagnosticActivity"].exists)
+        attach(settings.screenshot(), name: "About diagnostics")
+    }
+
     func testCompactTitleAndFormattingMenu() {
         let restoreClipboard = clipboardRestoration()
         defer { restoreClipboard() }
@@ -55,7 +80,10 @@ final class ToolbarRefinementUITests: XCTestCase {
         let editor = app.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
         let source = "First short line\nSecond line\n\nWrapped text that stays editable."
-        app.typeText(source)
+        // Paste the multiline fixture; synthesized Return can insert twice on a remote desktop.
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(source, forType: .string)
+        app.typeKey("v", modifierFlags: .command)
         app.typeKey(.upArrow, modifierFlags: .command)
         app.typeKey(.downArrow, modifierFlags: [.shift, .command])
         attach(app.dialogs.firstMatch.screenshot(), name: "TXT selected paragraphs hug text")
@@ -64,15 +92,15 @@ final class ToolbarRefinementUITests: XCTestCase {
         app.typeKey(",", modifierFlags: .command)
         let settings = app.windows["com_apple_SwiftUI_Settings_window"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        settings.toolbars.buttons["Files"].click()
+        settings.toolbars.buttons["Editor"].click()
         let option = settings.switches["showFormatToggle"].firstMatch
         XCTAssertTrue(option.waitForExistence(timeout: 5), app.debugDescription)
         option.click()
-        XCTAssertFalse(app.menuButtons["documentFormat"].exists)
+        XCTAssertFalse(app.buttons["documentFormat"].exists)
         XCTAssertEqual(editor.value as? String, source)
         option.click()
-        XCTAssertTrue(app.menuButtons["documentFormat"].exists)
-        XCTAssertEqual(app.menuButtons["documentFormat"].value as? String, "TXT")
+        XCTAssertTrue(app.buttons["documentFormat"].exists)
+        XCTAssertEqual(app.buttons["documentFormat"].value as? String, "TXT")
         editor.click()
         app.typeKey("a", modifierFlags: .command)
         app.typeText("Changed")
@@ -85,7 +113,7 @@ final class ToolbarRefinementUITests: XCTestCase {
         attach(app.dialogs.firstMatch.screenshot(), name: "TXT native undo and accented editing")
     }
 
-    func testEnabledFormatsPreserveDraftAndLimitFooterChoices() {
+    func testEnabledFormatsPreserveDraftAndCycleFooter() {
         let app = launchPad(format: "txt", appearance: "light", enabledFormats: "(md, txt, rtf)")
         defer { app.terminate() }
         let editor = app.textViews.firstMatch
@@ -96,8 +124,10 @@ final class ToolbarRefinementUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.toolbars.buttons["Files"].click()
         attach(settings.screenshot(), name: "Files settings initial default window")
+        settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -600)
         XCTAssertTrue(settings.buttons["chooseSaveFolder"].isHittable, settings.debugDescription)
         XCTAssertTrue(settings.staticTexts["Filename pattern"].isHittable, settings.debugDescription)
+        settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
         let markdown = settings.checkBoxes["enableFormat-md"].firstMatch
         let plainText = settings.checkBoxes["enableFormat-txt"].firstMatch
         let rtf = settings.checkBoxes["enableFormat-rtf"].firstMatch
@@ -117,28 +147,30 @@ final class ToolbarRefinementUITests: XCTestCase {
         attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling RTF")
         attach(settings.screenshot(), name: "Default Files settings with only Plain Text enabled")
         XCTAssertFalse(plainText.isEnabled, "The last enabled format stays selected")
-        XCTAssertFalse(app.menuButtons["documentFormat"].exists)
+        XCTAssertFalse(app.buttons["documentFormat"].exists)
         XCTAssertTrue(app.staticTexts["documentFormatLabel"].exists)
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        settings.toolbars.buttons["Editor"].click()
         let visibility = settings.switches["showFormatToggle"].firstMatch
         visibility.click()
         XCTAssertFalse(app.staticTexts["documentFormatLabel"].exists)
         visibility.click()
+        settings.toolbars.buttons["Files"].click()
         markdown.click()
         plainText.click()
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
         XCTAssertFalse(markdown.isEnabled)
         XCTAssertTrue(settings.popUpButtons["defaultFormat"].value as? String == "Markdown (.md)")
         attach(settings.screenshot(), name: "Files settings with one enabled format and retained TXT draft")
-        let footer = app.menuButtons["documentFormat"].firstMatch
+        let footer = app.buttons["documentFormat"].firstMatch
         XCTAssertTrue(footer.exists)
         XCTAssertEqual(footer.value as? String, "TXT")
         footer.click()
-        XCTAssertTrue(app.menuItems["Convert to Markdown…"].exists)
-        XCTAssertFalse(app.menuItems["Plain Text"].exists)
-        XCTAssertFalse(app.menuItems["RTF"].exists)
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        let formatLabel = app.staticTexts["documentFormatLabel"]
+        XCTAssertTrue(formatLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 5), "The draft now uses the Markdown editor")
+        XCTAssertFalse(footer.exists, "The single enabled format becomes a static label after conversion")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "The footer no longer exposes a format menu")
         app.typeKey(",", modifierFlags: .command)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
         plainText.click()
@@ -200,14 +232,14 @@ final class ToolbarRefinementUITests: XCTestCase {
         }
     }
 
-    private func launchPad(format: String, appearance: String = "dark", enabledFormats: String? = nil) -> XCUIApplication {
+    private func launchPad(format: String, appearance: String = "dark", enabledFormats: String = "(md, txt, rtf)") -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", format,
                                "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
                                "-quickPadWidth", "740", "-quickPadHeight", "480",
                                "-showInDock", "YES", "-menuBarItem", "NO", "-showFormatToggle", "YES", "-appearance", appearance]
-        if let enabledFormats { app.launchArguments += ["-pad.enabledFormats", enabledFormats] }
+        app.launchArguments += ["-pad.enabledFormats", enabledFormats]
         app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         app.typeKey("n", modifierFlags: .command)

@@ -616,29 +616,17 @@ struct PadView: View {
                     Spacer(minLength: 0)
                     if settings.showFormatToggle, files.isQuickPad, files.url == nil {
                         if files.hasFormatChoices {
-                            Menu {
-                                ForEach(files.enabledFormats) { format in
-                                    if files.enabledFormats.contains(files.currentFormat) {
-                                        Toggle(format.name, isOn: Binding(get: { files.currentFormat == format }, set: { chosen in
-                                            if chosen { Task { await files.changeFormat(to: format) } }
-                                        }))
-                                    } else {
-                                        Button("Convert to \(format.name)…") {
-                                            Task { await files.changeFormat(to: format) }
-                                        }
-                                    }
-                                }
+                            Button {
+                                Task { await files.cycleFormat() }
                             } label: {
                                 Text(files.currentFormat.title)
                             }
-                            .menuStyle(.button)
-                            .menuIndicator(.hidden)
                             .buttonStyle(PadFormatButtonStyle())
                             .fixedSize()
                             .accessibilityIdentifier("documentFormat")
                             .accessibilityLabel(files.currentFormat.name)
                             .accessibilityValue(files.currentFormat.title)
-                            .help("Change format")
+                            .help("Change to \(files.nextFormat?.name ?? files.currentFormat.name)")
                         } else {
                             Text(files.currentFormat.title)
                                 .font(.system(size: 11, weight: .medium))

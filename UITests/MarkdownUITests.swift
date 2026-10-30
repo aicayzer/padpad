@@ -79,7 +79,7 @@ final class MarkdownUITests: XCTestCase {
         XCTAssertTrue(contents.contains("*Italic keyboard text*"), contents)
         XCTAssertTrue(contents.contains("https://example.com/padpad-ui-test"), contents)
 
-        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "Saving locks the quick pad to its file type")
+        XCTAssertFalse(app.buttons["documentFormat"].exists, "Saving locks the quick pad to its file type")
         app.typeKey("n", modifierFlags: .command)
         waitForEditor(app)
         app.typeText("New document must not leak")
@@ -88,7 +88,7 @@ final class MarkdownUITests: XCTestCase {
         let fileWindow = app.windows[saved.lastPathComponent].firstMatch
         XCTAssertTrue(fileWindow.waitForExistence(timeout: 10), app.debugDescription)
         waitForEditor(app, in: fileWindow)
-        XCTAssertFalse(fileWindow.menuButtons["documentFormat"].exists, "Opened files retain their file type")
+        XCTAssertFalse(fileWindow.buttons["documentFormat"].exists, "Opened files retain their file type")
         fileWindow.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)).click()
         app.typeKey(.downArrow, modifierFlags: .command)
         app.typeText("\nAfter reopen")
@@ -414,7 +414,7 @@ final class MarkdownUITests: XCTestCase {
         let app = launchPad()
         defer { app.terminate() }
         waitForEditor(app)
-        let format = app.menuButtons["documentFormat"].firstMatch
+        let format = app.buttons["documentFormat"].firstMatch
         app.chooseFormat("Plain Text")
         let plain = app.textViews.firstMatch
         XCTAssertTrue(plain.waitForExistence(timeout: 5), app.debugDescription)
@@ -559,7 +559,7 @@ final class MarkdownUITests: XCTestCase {
         let window = app.windows.matching(NSPredicate(format: "title CONTAINS %@", "Letter.rtf")).firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10), app.debugDescription)
         waitForEditor(app, in: window)
-        XCTAssertFalse(window.menuButtons["documentFormat"].exists, "Opened files retain their file type")
+        XCTAssertFalse(window.buttons["documentFormat"].exists, "Opened files retain their file type")
 
         // The Aa menu offers alignment instead of headings, quotes and code blocks.
         window.menuButtons["formattingMenu"].firstMatch.click()
@@ -652,6 +652,8 @@ final class MarkdownUITests: XCTestCase {
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", "md", "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
                                "-showInDock", "YES", "-menuBarItem", "NO", "-pad.editingShortcuts", "invalid"]
         app.launchArguments += sharedUITestLaunchArguments
+        // These tests round-trip raw Markdown through TXT without an RTF conversion.
+        app.launchArguments += ["-pad.enabledFormats", "(md, txt)"]
         app.launch()
         app.typeKey("n", modifierFlags: .command)
         return app

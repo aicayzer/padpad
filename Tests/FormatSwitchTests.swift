@@ -5,6 +5,54 @@ import Testing
 
 @MainActor
 @Suite struct FormatSwitchTests {
+    @Test func cyclingSkipsDisabledFormatsAndPreservesSource() async throws {
+        let fixture = try FormatSwitchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.setFormatEnabled(.rtf, enabled: false)
+        let source = "# Keep é\r\n\r\n**These**  spaces\r\n"
+        document.text = source
+        document.editorSnapshot = { source }
+        await document.cycleFormat()
+        #expect(document.currentFormat == .txt)
+        #expect(document.text == source)
+        await document.cycleFormat()
+        #expect(document.currentFormat == .md)
+        #expect(document.text == source)
+        #expect(document.format == .md)
+        document.setFormatEnabled(.md, enabled: false)
+        #expect(document.nextFormat == .txt)
+        await document.cycleFormat()
+        #expect(document.currentFormat == .txt)
+        #expect(document.nextFormat == nil)
+        await document.cycleFormat()
+        #expect(document.text == source)
+    }
+
+    @Test func failedCycleRetainsFormatAndText() async throws {
+        let fixture = try FormatSwitchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.text = "Keep this"
+        document.editorSnapshot = { throw CocoaError(.fileReadUnknown) }
+        await document.cycleFormat()
+        #expect(document.currentFormat == .md)
+        #expect(document.text == "Keep this")
+        #expect(!document.isBusy)
+    }
+
+    @Test func cycleOrderIncludesRTFAndWraps() async throws {
+        let fixture = try FormatSwitchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        #expect(document.nextFormat == .txt)
+        await document.cycleFormat()
+        #expect(document.nextFormat == .rtf)
+        await document.cycleFormat()
+        #expect(document.currentFormat == .rtf)
+        #expect(document.nextFormat == .md)
+    }
+
     @Test func scratchRoundTripPreservesSourceBytesIdentityAndDefault() async throws {
         let fixture = try FormatSwitchFixture()
         defer { fixture.cleanUp() }

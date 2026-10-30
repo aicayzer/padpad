@@ -954,7 +954,7 @@
 			repositoryURL = "https://github.com/aicayzer/inkkit";
 			requirement = {
 				kind = exactVersion;
-				version = 0.6.0;
+				version = 0.6.1;
 			};
 		};
 		C1B54B557F3434BE99D6F254 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {

@@ -4,6 +4,67 @@ import XCTest
 
 @MainActor
 final class MarkdownUITests: XCTestCase {
+    func testCompactFindDisclosureReplacementAndNewDraft() throws {
+        let previousClipboard = captureClipboard()
+        defer { restoreClipboard(previousClipboard) }
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        paste("Garden one. Garden two. Garden three.", into: app)
+        app.typeKey("f", modifierFlags: .command)
+        let find = app.textFields["Find"].firstMatch
+        XCTAssertTrue(find.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.textFields["Replace with"].firstMatch.exists)
+        app.typeText("garden")
+        XCTAssertTrue(app.staticTexts["1 of 3 matches"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Next Match"].firstMatch.click()
+        XCTAssertTrue(app.staticTexts["2 of 3 matches"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Previous Match"].firstMatch.click()
+        XCTAssertTrue(app.staticTexts["1 of 3 matches"].firstMatch.waitForExistence(timeout: 5))
+        attach(app.screenshot(), name: "Compact Find collapsed")
+        app.buttons["find.disclosure"].firstMatch.click()
+        let replacement = app.textFields["Replace with"].firstMatch
+        XCTAssertTrue(replacement.waitForExistence(timeout: 5))
+        XCTAssertEqual(find.frame.minX, replacement.frame.minX, accuracy: 1)
+        XCTAssertLessThanOrEqual(find.frame.maxX, app.dialogs.firstMatch.frame.maxX)
+        replacement.click()
+        app.typeText("Park")
+        attach(app.screenshot(), name: "Compact Find expanded with aligned fields")
+        app.buttons["Replace"].firstMatch.click()
+        XCTAssertTrue(app.staticTexts["1 of 2 matches"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Replace All"].firstMatch.click()
+        XCTAssertTrue(app.staticTexts["0 of 0 matches"].firstMatch.waitForExistence(timeout: 5))
+        copyMarkdown(app, expecting: "Park one. Park two. Park three.")
+        app.typeKey("n", modifierFlags: .command)
+        let discard = app.buttons["Discard Changes"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.click()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: find)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+        app.typeText("New draft accepts typing")
+        copyMarkdown(app, expecting: "New draft accepts typing")
+    }
+
+    func testImagePasteLeavesDocumentUnchangedWithClearFeedback() throws {
+        let previousClipboard = captureClipboard()
+        defer { restoreClipboard(previousClipboard) }
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        paste("Keep this text", into: app)
+        let picture = NSImage(size: NSSize(width: 2, height: 2), flipped: false) { bounds in
+            NSColor.red.setFill(); bounds.fill(); return true
+        }
+        NSPasteboard.general.clearContents()
+        XCTAssertTrue(NSPasteboard.general.writeObjects([picture]))
+        app.typeKey("v", modifierFlags: .command)
+        let feedback = app.buttons["editorFeedback"].firstMatch
+        XCTAssertTrue(feedback.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(feedback.label.contains("Images aren’t supported."))
+        copyMarkdown(app, expecting: "Keep this text")
+        attach(app.screenshot(), name: "Unsupported image paste feedback")
+    }
+
     func testExistingFileReadsUntilClickWhileNewScratchComposes() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -453,6 +514,8 @@ final class MarkdownUITests: XCTestCase {
     }
 
     func testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory() throws {
+        let previousClipboard = captureClipboard()
+        defer { restoreClipboard(previousClipboard) }
         let app = launchPad()
         defer { app.terminate() }
         waitForEditor(app)
@@ -478,14 +541,15 @@ final class MarkdownUITests: XCTestCase {
         XCTAssertFalse(app.menuItems["Markdown Source"].firstMatch.isEnabled)
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertEqual(find.value as? String, "Native find")
-        let replacement = app.textFields["Replace"].firstMatch
+        app.buttons["find.disclosure"].firstMatch.click()
+        let replacement = app.textFields["Replace with"].firstMatch
         replacement.click()
         app.typeText("Native replacement")
         app.typeKey(.downArrow, modifierFlags: .option)
         app.typeKey("i", modifierFlags: .command)
         XCTAssertEqual(replacement.value as? String, "Native replacement")
         copyMarkdown(app, expecting: "Second\n\nFirst\n\nThird")
-        app.buttons["Done"].firstMatch.click()
+        app.buttons["Close Find"].firstMatch.click()
 
         app.typeKey("k", modifierFlags: .command)
         let link = app.textFields["Link URL"].firstMatch
@@ -644,6 +708,21 @@ final class MarkdownUITests: XCTestCase {
         }, object: nil)
         _ = XCTWaiter.wait(for: [copied], timeout: 5)
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), expected)
+    }
+
+    private func captureClipboard() -> [NSPasteboardItem] {
+        (NSPasteboard.general.pasteboardItems ?? []).map { original in
+            let item = NSPasteboardItem()
+            for type in original.types {
+                if let data = original.data(forType: type) { item.setData(data, forType: type) }
+            }
+            return item
+        }
+    }
+
+    private func restoreClipboard(_ items: [NSPasteboardItem]) {
+        NSPasteboard.general.clearContents()
+        if !items.isEmpty { NSPasteboard.general.writeObjects(items) }
     }
 
     private func launchPad() -> XCUIApplication {

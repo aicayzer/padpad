@@ -45,10 +45,18 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
                     webView.window?.makeFirstResponder(field)
                     field.selectText(nil)
                 } else { webView.window?.makeFirstResponder(findInputResponder) }
-            } else { findInputResponder.discardEvents() }
+            } else {
+                findInputResponder.discardEvents()
+                showingReplacement = false
+                searchText = ""
+                searchState = PadSearchState()
+                if oldValue && isReady { find(direction: 0) }
+            }
         }
     }
     @ObservationIgnored private let findInputResponder = OverlayInputResponder()
+    var showingReplacement = false
+    private(set) var searchState = PadSearchState()
     var searchText = ""
     var replacementText = ""
     @ObservationIgnored private var printRenderer: PadPrintRenderer?
@@ -183,6 +191,7 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     }
 
     private func replace(_ source: String, format: PadFormat, documentID: UUID, reload: Bool) {
+        isReady = false
         generation += 1
         diagnostics?.record(.load, scope: diagnosticScope, format: format, generation: generation)
         self.documentID = documentID
@@ -198,7 +207,6 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
         focusTask?.cancel()
         focusTask = nil
         if ownsFirstResponder { webView.window?.makeFirstResponder(inputBuffer) }
-        isReady = false
         hasFocusedDocument = false
         pendingLoad = (source, format, reload)
         if pageReady { applyPendingLoad() }
@@ -489,7 +497,16 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
 
     func undo() { guard canUndo else { return }; call("undo", json(generation)) }
     func redo() { guard canRedo else { return }; call("redo", json(generation)) }
-    func find() { guard isReady else { return }; call("find", json(searchText), json(generation)) }
+    func find(direction: Int = 0) {
+        guard isReady else { return }
+        if searchState.query != searchText { searchState = PadSearchState(query: searchText) }
+        call("find", json(searchText), json(generation), json(direction))
+    }
+
+    func dismissFind() {
+        showingFind = false
+        focus()
+    }
     func replace(all: Bool) {
         guard canReplace, !searchText.isEmpty else { return }
         call(all ? "replaceAll" : "replace", json(searchText), json(replacementText), json(generation))
@@ -660,6 +677,15 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
             if caret["quoted"] as? Bool == true { active.insert("quote") }
             if let align = caret["align"] as? String { active.insert("align" + align.capitalized) }
             activeMarks = active
+        case "searchState":
+            guard message["generation"] as? Int == generation,
+                  message["documentId"] as? String == documentID?.uuidString,
+                  let state = PadSearchState(message), state.query == searchText else { return }
+            searchState = state
+        case "imagesDisabled":
+            guard message["generation"] as? Int == generation,
+                  message["documentId"] as? String == documentID?.uuidString else { return }
+            showFeedback(PadMarkdownEditorFeedback(code: "images-disabled", source: .edit))
         case "openLink":
             guard let href = message["href"] as? String, let url = URL(string: href),
                   let scheme = url.scheme?.lowercased(), ["https", "http", "mailto"].contains(scheme) else { return }
@@ -870,5 +896,22 @@ final class PadDiagnosticReportRequest {
         timeout?.cancel()
         timeout = nil
         continuation.resume(returning: result)
+    }
+}
+
+struct PadSearchState: Equatable {
+    var query = ""
+    var current = 0
+    var total = 0
+
+    init(query: String = "") { self.query = query }
+
+    init?(_ message: [String: Any]) {
+        guard let query = message["query"] as? String,
+              let current = message["current"] as? Int, let total = message["total"] as? Int,
+              current >= 0, total >= current else { return nil }
+        self.query = query
+        self.current = current
+        self.total = total
     }
 }

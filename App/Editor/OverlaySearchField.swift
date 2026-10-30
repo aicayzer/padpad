@@ -14,6 +14,8 @@ struct OverlaySearchField: NSViewRepresentable {
     let dismiss: () -> Void
     var move: ((Int) -> Void)?
     var blur: (() -> Void)?
+    var initiallyFocused = true
+    var previousSubmit: (() -> Void)?
 
     func makeNSView(context: Context) -> OverlayTextField {
         let field = OverlayTextField()
@@ -37,6 +39,7 @@ struct OverlaySearchField: NSViewRepresentable {
         field.isCurrent = isCurrent
         field.blur = blur
         if field.stringValue != text { field.stringValue = text }
+        field.initiallyFocused = initiallyFocused
         field.requestInitialFocus()
     }
 
@@ -63,7 +66,9 @@ struct OverlaySearchField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             guard parent.isCurrent() else { return false }
             switch selector {
-            case #selector(NSResponder.insertNewline(_:)): parent.submit()
+            case #selector(NSResponder.insertNewline(_:)):
+                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true, let previous = parent.previousSubmit { previous() }
+                else { parent.submit() }
             case #selector(NSResponder.cancelOperation(_:)): parent.dismiss()
             case #selector(NSResponder.moveUp(_:)):
                 guard let move = parent.move else { return false }
@@ -92,6 +97,7 @@ struct OverlaySearchField: NSViewRepresentable {
 final class OverlayTextField: NSTextField {
     var isCurrent: () -> Bool = { false }
     var selectsTextOnFocus = false
+    var initiallyFocused = true
     var blur: (() -> Void)?
     private var outsideClickMonitor: Any?
     private(set) var hasFocused = false
@@ -113,7 +119,7 @@ final class OverlayTextField: NSTextField {
     @objc private func windowBecameKey() { requestInitialFocus() }
 
     func requestInitialFocus() {
-        guard !hasFocused, !scheduled, window != nil, isCurrent() else { return }
+        guard initiallyFocused, !hasFocused, !scheduled, window != nil, isCurrent() else { return }
         scheduled = true
         let request = generation
         DispatchQueue.main.async { [weak self] in

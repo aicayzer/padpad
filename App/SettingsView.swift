@@ -215,6 +215,7 @@ struct SettingsView: View {
                     .tint(.primary)
                     .accessibilityIdentifier("defaultFormat")
                     Toggle("Save automatically", isOn: $document.saveAutomatically)
+                        .accessibilityIdentifier("saveAutomatically")
                     Picker("Clear draft", selection: $document.reusePeriod) {
                         ForEach(PadReuse.allCases) { period in
                             Text(period.title).tag(period)

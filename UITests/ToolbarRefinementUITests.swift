@@ -15,7 +15,7 @@ final class ToolbarRefinementUITests: XCTestCase {
         XCTAssertTrue(settings.staticTexts["Quick pad formats"].exists)
         XCTAssertFalse(settings.switches["showFormatToggle"].exists)
         XCTAssertLessThan(settings.popUpButtons["defaultFormat"].frame.minY,
-                          settings.switches["Save automatically"].frame.minY)
+                          settings.switches["saveAutomatically"].frame.minY)
         attach(settings.screenshot(), name: "Formats and draft defaults")
         settings.toolbars.buttons["Editor"].click()
         XCTAssertTrue(settings.switches["showFormatToggle"].exists)
@@ -80,7 +80,10 @@ final class ToolbarRefinementUITests: XCTestCase {
         let editor = app.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
         let source = "First short line\nSecond line\n\nWrapped text that stays editable."
-        app.typeText(source)
+        // Paste the multiline fixture; synthesized Return can insert twice on a remote desktop.
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(source, forType: .string)
+        app.typeKey("v", modifierFlags: .command)
         app.typeKey(.upArrow, modifierFlags: .command)
         app.typeKey(.downArrow, modifierFlags: [.shift, .command])
         attach(app.dialogs.firstMatch.screenshot(), name: "TXT selected paragraphs hug text")
@@ -163,8 +166,11 @@ final class ToolbarRefinementUITests: XCTestCase {
         XCTAssertTrue(footer.exists)
         XCTAssertEqual(footer.value as? String, "TXT")
         footer.click()
-        expectValue("MD", in: footer)
-        XCTAssertFalse(app.menus.firstMatch.exists, "A footer click cycles directly without a menu")
+        let formatLabel = app.staticTexts["documentFormatLabel"]
+        XCTAssertTrue(formatLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 5), "The draft now uses the Markdown editor")
+        XCTAssertFalse(footer.exists, "The single enabled format becomes a static label after conversion")
+        XCTAssertFalse(app.menuButtons["documentFormat"].exists, "The footer no longer exposes a format menu")
         app.typeKey(",", modifierFlags: .command)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
         plainText.click()
@@ -226,14 +232,14 @@ final class ToolbarRefinementUITests: XCTestCase {
         }
     }
 
-    private func launchPad(format: String, appearance: String = "dark", enabledFormats: String? = nil) -> XCUIApplication {
+    private func launchPad(format: String, appearance: String = "dark", enabledFormats: String = "(md, txt, rtf)") -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", format,
                                "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
                                "-quickPadWidth", "740", "-quickPadHeight", "480",
                                "-showInDock", "YES", "-menuBarItem", "NO", "-showFormatToggle", "YES", "-appearance", appearance]
-        if let enabledFormats { app.launchArguments += ["-pad.enabledFormats", enabledFormats] }
+        app.launchArguments += ["-pad.enabledFormats", enabledFormats]
         app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         app.typeKey("n", modifierFlags: .command)

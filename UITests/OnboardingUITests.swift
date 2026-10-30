@@ -338,7 +338,7 @@ final class OnboardingUITests: XCTestCase {
         expectHittable(app.menuButtons["formattingMenu"].firstMatch, timeout: 15)
         expectValue("MD", in: app.buttons["documentFormat"].firstMatch)
         // The footer button carries the current format as its accessible name.
-        XCTAssertEqual(app.buttons["documentFormat"].firstMatch.title, "Markdown")
+        XCTAssertEqual(app.buttons["documentFormat"].firstMatch.label, "Markdown")
     }
 
     private func switchToText(_ app: XCUIApplication) {

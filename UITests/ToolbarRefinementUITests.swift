@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 
 @MainActor
-final class ToolbarRefinementUITests: XCTestCase {
+final class ToolbarRefinementUITests: PadUITestCase {
     func testSettingsGroupFormatsDraftsAndEditorControls() {
         let app = launchPad(format: "txt", appearance: "light")
         defer { app.terminate() }
@@ -250,7 +250,7 @@ final class ToolbarRefinementUITests: XCTestCase {
         let text = checkboxes.map { "\($0.identifier): value=\(String(describing: $0.value)) enabled=\($0.isEnabled) hittable=\($0.isHittable) frame=\($0.frame)" }.joined(separator: "\n")
         let attachment = XCTAttachment(string: text)
         attachment.name = name
-        attachment.lifetime = .keepAlways
+        attachment.lifetime = .deleteOnSuccess
         add(attachment)
     }
 
@@ -262,12 +262,5 @@ final class ToolbarRefinementUITests: XCTestCase {
     private func expectValue(_ value: String, in element: XCUIElement) {
         let match = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [match], timeout: 5), .completed, element.debugDescription)
-    }
-
-    private func attach(_ screenshot: XCUIScreenshot, name: String) {
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }

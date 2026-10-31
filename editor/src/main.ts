@@ -7,14 +7,15 @@ import {
   type DiagnosticReport,
   type DocumentSnapshot,
   type FormatCommand,
+  type FindSession,
   type FormatOptions,
   type KeyInput,
   type TableCommand,
+  canOpenLink,
+  normalizeLinkAddress,
 } from "@aicayzer/inkkit";
 import "@aicayzer/inkkit/style.css";
 import "./style.css";
-import { PadFind } from "./find";
-import { declineImageInput } from "./image-input";
 
 function post(message: Record<string, unknown>): void {
   const host = (
@@ -61,30 +62,7 @@ const root = document.getElementById("editor");
 if (!root) throw new Error("editor root missing");
 type DocumentContext = { documentId: string; generation: number };
 let documentContext: DocumentContext | undefined;
-let finder: PadFind | undefined;
-let refreshScheduled = false;
-function refreshFind(): void {
-  if (refreshScheduled) return;
-  refreshScheduled = true;
-  queueMicrotask(() => {
-    refreshScheduled = false;
-    if (!finder || !documentContext) return;
-    try {
-      finder.refresh(documentContext.generation);
-    } catch (error) {
-      if (
-        !(error instanceof InkKitError) ||
-        ![
-          "not-ready",
-          "stale-document",
-          "composition",
-          "operation-pending",
-        ].includes(error.code)
-      )
-        throw error;
-    }
-  });
-}
+let finder: FindSession | undefined;
 let diagnosticsReader: (() => DiagnosticReport) | undefined;
 const errorContexts = new WeakMap<InkKitError, DocumentContext>();
 const clipboardReplies = new Map<
@@ -169,10 +147,10 @@ const editor = await InkKitEditor.mount(
         generation: state.generation,
       };
       post({ type: "commands", ...state });
-      refreshFind();
     },
     openLink(href) {
-      post({ type: "openLink", href });
+      // Relative links and custom schemes are not for the system to open.
+      if (canOpenLink(href)) post({ type: "openLink", href: href.trim() });
     },
     copy(text) {
       post({ type: "copy", text });
@@ -193,12 +171,7 @@ const editor = await InkKitEditor.mount(
   },
   { formats, textInput: { smartPunctuation: false } },
 );
-finder = new PadFind(editor, (state) =>
-  post({ type: "searchState", ...state }),
-);
-declineImageInput(root, () => {
-  if (documentContext) post({ type: "imagesDisabled", ...documentContext });
-});
+finder = editor.findSession((state) => post({ type: "searchState", ...state }));
 diagnosticsReader = () => editor.diagnosticReport();
 function diagnosticReason(error: InkKitError): string | undefined {
   if (error.code !== "preservation") return undefined;
@@ -251,7 +224,6 @@ const facade = {
     editor.loadDocument(
       documentInput(source, nextGeneration, documentId, format),
     );
-    finder!.reset(nextGeneration);
   },
   reload(
     source: string,
@@ -262,7 +234,6 @@ const facade = {
     editor.reloadDocument(
       documentInput(source, nextGeneration, documentId, format),
     );
-    finder!.reset(nextGeneration);
   },
   snapshot(expectedGeneration: number) {
     try {
@@ -298,17 +269,13 @@ const facade = {
     return output;
   },
   setEditingMode: (mode: "source" | "formatted", expected: number) =>
-    guardedCommand(() => {
-      const result = editor.setEditingMode(mode, expected);
-      finder!.restore(expected);
-      return result;
-    }),
+    guardedCommand(() => editor.setEditingMode(mode, expected)),
   undo: (expected: number) => guardedCommand(() => editor.undo(expected)),
   redo: (expected: number) => guardedCommand(() => editor.redo(expected)),
   replace: (search: string, replacement: string, expected: number) =>
-    guardedCommand(() => finder!.replace(search, replacement, expected, false)),
+    guardedCommand(() => finder!.replace(search, replacement, expected)),
   replaceAll: (search: string, replacement: string, expected: number) =>
-    guardedCommand(() => finder!.replace(search, replacement, expected, true)),
+    guardedCommand(() => finder!.replaceAll(search, replacement, expected)),
   async printable(expectedGeneration: number) {
     try {
       const output = await editor.printableSnapshot(expectedGeneration);
@@ -343,11 +310,20 @@ const facade = {
   linkContext: (expected: number) => {
     const snapshot = editor.textSnapshot(expected);
     const rect = editor.textRangesRects([snapshot.selection])[0]?.[0];
-    return { rect: rect ?? null };
+    return {
+      rect: rect ?? null,
+      href: editor.commandState(expected).caret.href ?? null,
+    };
   },
   focus: editor.focus.bind(editor),
   find: (search: string, expected: number, direction = 0) =>
-    guardedCommand(() => finder!.find(search, expected, direction)),
+    guardedCommand(() =>
+      finder!.find(
+        search,
+        direction ? { direction: direction < 0 ? "previous" : "next" } : {},
+        expected,
+      ),
+    ),
   insertText: (text: string, expected: number) =>
     guardedCommand(() => editor.insertText(text, expected)),
   keyDown: (input: KeyInput, expected: number) =>
@@ -356,6 +332,7 @@ const facade = {
     guardedCommand(() => editor.pasteAsPlainText(text, expected)),
   table: (command: TableCommand, expected: number) =>
     guardedCommand(() => editor.table(command, undefined, expected)),
+  normalizeLink: (input: string) => normalizeLinkAddress(input) ?? null,
   setAccent: (color: string) =>
     document.documentElement.style.setProperty("--inkkit-accent-color", color),
   setTextSize: (px: number) =>

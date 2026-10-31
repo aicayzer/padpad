@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 
 @MainActor
-final class GlobalShortcutUITests: XCTestCase {
+final class GlobalShortcutUITests: PadUITestCase {
     func testGlobalShortcutOpensAboveAnotherApplicationWithoutActivating() throws {
         continueAfterFailure = false
         let directory = FileManager.default.temporaryDirectory.appending(path: "pad-shortcut-cover-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -85,13 +85,11 @@ final class GlobalShortcutUITests: XCTestCase {
         let coverID = try XCTUnwrap(coverInfo[kCGWindowNumber as String] as? Int)
         XCTAssertEqual(process.activationPolicy, .accessory)
 
-        let finderMenuBar = finder.menuBars.firstMatch
-        XCTAssertTrue(finderMenuBar.waitForExistence(timeout: 5), finder.debugDescription)
         let editor = app.textViews.firstMatch
         let close = app.buttons["Close PadPad"].firstMatch
         XCTAssertFalse(close.exists)
         for cycle in 1...3 {
-            finderMenuBar.typeKey("b", modifierFlags: [.option, .shift])
+            FinderKeyboard.press("b", [.option, .shift])
             XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
             XCTAssertTrue(coverFrame.intersects(editor.frame), "The disposable Finder window must overlap the editor")
             let ordering = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -108,11 +106,11 @@ final class GlobalShortcutUITests: XCTestCase {
                            "The quick pad must be above the overlapping foreground window")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
             // Synthesize through the foreground app without activating or clicking PadPad.
-            finderMenuBar.typeKey("a", modifierFlags: [])
+            FinderKeyboard.press("a")
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", String(repeating: "a", count: cycle)), object: editor)
             XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 5), .completed, "Typing must reach the pad without a click")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
-            finderMenuBar.typeKey("b", modifierFlags: [.option, .shift])
+            FinderKeyboard.press("b", [.option, .shift])
             let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
             XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
         }
@@ -120,7 +118,7 @@ final class GlobalShortcutUITests: XCTestCase {
 }
 
 @MainActor
-final class PadUITests: XCTestCase {
+final class PadUITests: PadUITestCase {
     func testRejectedRenameKeepsTitleAndReturnsTypingToEditor() {
         let app = launchPad()
         defer { app.terminate() }
@@ -310,10 +308,7 @@ final class PadUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == false OR hittable == false"), object: close)
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, app.debugDescription)
         XCTAssertFalse(app.buttons["Discard Changes"].firstMatch.exists)
-        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
-        finder.activate()
-        XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
-        finder.menuBars.firstMatch.typeKey("p", modifierFlags: [.control, .option, .shift, .command])
+        FinderKeyboard.pressAfterActivating("p", [.control, .option, .shift, .command])
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
         expectValue("Saved content with unsaved changes", in: editor)
         let saved = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
@@ -349,7 +344,7 @@ final class PadUITests: XCTestCase {
         attach(settings.screenshot(), name: "Effective development shortcut")
         let shortcutDescription = XCTAttachment(string: settings.debugDescription)
         shortcutDescription.name = "Effective shortcut accessibility state"
-        shortcutDescription.lifetime = .keepAlways
+        shortcutDescription.lifetime = .deleteOnSuccess
         add(shortcutDescription)
         settings.buttons["_XCUI:CloseWindow"].click()
         let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
@@ -359,15 +354,12 @@ final class PadUITests: XCTestCase {
         let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR hittable == false"), object: close)
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
 
-        // Finder can have no window; use its on-screen menu bar as the event target.
-        let finderMenuBar = finder.menuBars.firstMatch
-        XCTAssertTrue(finderMenuBar.waitForExistence(timeout: 5), finder.debugDescription)
-        XCTAssertGreaterThan(finderMenuBar.frame.width, 0)
-        finderMenuBar.typeKey("p", modifierFlags: [.control, .option, .command, .shift])
+        // Finder can have no window, so post the shortcut as a system keyboard event.
+        FinderKeyboard.press("p", [.control, .option, .command, .shift])
         let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: close)
         XCTAssertEqual(XCTWaiter.wait(for: [shown], timeout: 5), .completed, app.debugDescription)
         attach(app.screenshot(), name: "Pad opened with development global shortcut")
-        finderMenuBar.typeKey("p", modifierFlags: [.control, .option, .command, .shift])
+        FinderKeyboard.press("p", [.control, .option, .command, .shift])
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR hittable == false"), object: close)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
         XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
@@ -410,7 +402,7 @@ final class PadUITests: XCTestCase {
         XCTAssertGreaterThan(picker.frame.width, 0)
         let sharingState = XCTAttachment(string: app.debugDescription)
         sharingState.name = "Native sharing picker accessibility state"
-        sharingState.lifetime = .keepAlways
+        sharingState.lifetime = .deleteOnSuccess
         add(sharingState)
         attach(XCUIScreen.main.screenshot(), name: "Native sharing picker")
         app.typeKey(.escape, modifierFlags: [])
@@ -673,18 +665,14 @@ final class PadUITests: XCTestCase {
                 matchingDockItems.allElementsBoundByIndex.map { $0.debugDescription }.joined(separator: "\n")
             let evidence = XCTAttachment(string: details)
             evidence.name = "Dock classification - \(stage)"
-            evidence.lifetime = .keepAlways
+            evidence.lifetime = .deleteOnSuccess
             add(evidence)
             attach(XCUIScreen.main.screenshot(), name: "Menu bar startup - \(stage)")
         }
 
         checkDock("hidden launch")
         let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
-        finder.activate()
-        XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
-        let finderMenu = finder.menuBars.firstMatch
-        XCTAssertTrue(finderMenu.waitForExistence(timeout: 5))
-        finderMenu.typeKey("b", modifierFlags: [.control, .option, .command])
+        FinderKeyboard.pressAfterActivating("b", [.control, .option, .command])
         XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
         checkDock("first shortcut opening")
         let draft = "Disposable menu bar floating startup draft"
@@ -694,18 +682,18 @@ final class PadUITests: XCTestCase {
         XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
         let close = app.buttons["Close PadPad"].firstMatch
         for iteration in 1...3 {
-            finderMenu.typeKey("b", modifierFlags: [.control, .option, .command])
+            FinderKeyboard.press("b", [.control, .option, .command])
             let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: close)
             XCTAssertEqual(XCTWaiter.wait(for: [shown], timeout: 5), .completed, app.debugDescription)
             expectValue(draft, in: editor)
             checkDock("shortcut opened \(iteration)")
-            finderMenu.typeKey("b", modifierFlags: [.control, .option, .command])
+            FinderKeyboard.press("b", [.control, .option, .command])
             let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR hittable == false"), object: close)
             XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, app.debugDescription)
             XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
             checkDock("shortcut hidden \(iteration)")
         }
-        finderMenu.typeKey("b", modifierFlags: [.control, .option, .command])
+        FinderKeyboard.press("b", [.control, .option, .command])
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         app.typeKey(",", modifierFlags: .command)
         let settings = app.windows["com_apple_SwiftUI_Settings_window"]
@@ -723,7 +711,7 @@ final class PadUITests: XCTestCase {
         checkDock("Settings returned to editor")
         finder.activate()
         XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
-        finderMenu.typeKey("b", modifierFlags: [.control, .option, .command])
+        FinderKeyboard.press("b", [.control, .option, .command])
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         checkDock("shortcut after Settings")
 
@@ -734,7 +722,7 @@ final class PadUITests: XCTestCase {
         let afterQuit = XCTAttachment(string: "Exact application-name Dock items after termination: \(matchingDockItems.count)\n" +
             matchingDockItems.allElementsBoundByIndex.map { $0.debugDescription }.joined(separator: "\n"))
         afterQuit.name = "Dock item persistence after app termination"
-        afterQuit.lifetime = .keepAlways
+        afterQuit.lifetime = .deleteOnSuccess
         add(afterQuit)
     }
 
@@ -765,9 +753,7 @@ final class PadUITests: XCTestCase {
             predicate: NSPredicate(format: "activationPolicy == %d", NSApplication.ActivationPolicy.accessory.rawValue),
             object: process)
         XCTAssertEqual(XCTWaiter.wait(for: [accessory], timeout: 5), .completed)
-        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
-        finder.activate()
-        finder.menuBars.firstMatch.typeKey("p", modifierFlags: [.control, .option, .command, .shift])
+        FinderKeyboard.pressAfterActivating("p", [.control, .option, .command, .shift])
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(process.activationPolicy, .accessory)
         attach(app.screenshot(), name: "Stored menu bar access after cold launch and shortcut")
@@ -788,18 +774,16 @@ final class PadUITests: XCTestCase {
         app.launchArguments += sharedUITestLaunchArguments
         app.launch()
         defer { app.terminate() }
-        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
         let close = app.buttons["Close PadPad"].firstMatch
         XCTAssertFalse(close.exists)
-        finder.activate()
-        finder.typeKey("b", modifierFlags: [.option, .shift])
+        FinderKeyboard.pressAfterActivating("b", [.option, .shift])
         XCTAssertTrue(close.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.menuButtons["formattingMenu"].firstMatch.waitForExistence(timeout: 10))
         app.typeText("Retained Markdown")
-        finder.activate()
+        FinderKeyboard.activate()
         let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
-        finder.typeKey("b", modifierFlags: [.option, .shift])
+        FinderKeyboard.press("b", [.option, .shift])
         XCTAssertTrue(close.waitForExistence(timeout: 5), "The shortcut must show hidden Markdown before snapshotting")
     }
 
@@ -888,12 +872,5 @@ final class PadUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed,
                        "Expected \(String(reflecting: expected)); actual \(String(describing: element.value))",
                        file: file, line: line)
-    }
-
-    private func attach(_ screenshot: XCUIScreenshot, name: String) {
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }

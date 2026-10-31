@@ -35,6 +35,63 @@ pnpm test
 pnpm build
 ```
 
-Use the shared Pad scheme for native build and tests. Window tests require an isolated GUI session and `PAD_WINDOW_TESTS` in the test host environment. UI tests launch the app with macOS inline predictions off (`UITests/UITestLaunch.swift`), because the prediction panel consumes synthesized key events and can duplicate a typed character. Use disposable files, never personal documents. Required CI must pass before merging a pull request; native interaction checks are also needed for changes to focus, save, rename, close, or window behavior.
+Build and test natively through the shared schemes. Each scheme carries test plans in `TestPlans/`, generated into the project from `project.yml`, with a per-test time allowance so a hung test fails instead of stalling a run.
 
-Public pull requests use hosted CI. Do not attach personal persistent runners.
+| Scheme | Plan | Covers |
+| --- | --- | --- |
+| Pad | Native | Unit suites, plus the suites that open windows when `PAD_WINDOW_TESTS=1` |
+| Pad UI Tests | UIEditor | Editing, formatting, clipboard, tables, find and RTF files (`MarkdownUITests`) |
+| Pad UI Tests | UIShell | Quick pad lifecycle, rename, save, Dock and menu bar access (`PadUITests`) |
+| Pad UI Tests | UISettings | Onboarding, Settings, toolbar, the global shortcut over Finder and the test identity |
+
+```sh
+xcodebuild -project Pad.xcodeproj -scheme Pad -testPlan Native -destination 'platform=macOS' \
+  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
+```
+
+### Window and UI tests
+
+Window tests and UI tests take over the keyboard, mouse and windows of the session they run in, so run them only in an isolated GUI session on a machine you are not using. Each refuses to run unless the session declares itself isolated:
+
+- `TEST_RUNNER_PAD_WINDOW_TESTS=1` enables the unit suites that open windows. Without it they report as skipped.
+- `TEST_RUNNER_PAD_UI_TESTS=1` is required by every UI test. Without it they fail at once with an explanation.
+
+```sh
+TEST_RUNNER_PAD_UI_TESTS=1 xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tests' -testPlan UIEditor \
+  -destination 'platform=macOS' -parallel-testing-enabled NO \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
+```
+
+UI tests launch the Debug build, `PadPad Dev` (`me.cyzr.pad.dev`), with its own preferences, shortcut and icon, and a test confirms this identity. UI tests launch the app with macOS inline predictions off (`UITests/UITestSupport.swift`), because the prediction panel consumes synthesized key events and can duplicate a typed character. Use disposable files, never personal documents.
+
+XCTest waits about ten seconds for an application it did not launch, such as Finder, each time a test sends it a key; the first event after a SwiftUI menu opens costs about the same. Press shortcuts through `FinderKeyboard` only in tests that need Finder in front, and prefer `app.typeKey` otherwise. Posting `CGEvent` keys would avoid the wait, but needs Accessibility access that the test runner lacks.
+
+Screenshots attach with `deleteOnSuccess`, so a passing run keeps no images.
+
+### Continuous integration
+
+Workflow `CI` runs on pull requests, not on pushes to `main`. A superseded run is cancelled, and a draft pull request runs the fast lanes only. The required check is **CI result**, which passes when every lane passed or was skipped by scope.
+
+| Lane | Runs when | What it does |
+| --- | --- | --- |
+| Changes | Always | `scripts/ci-scope.mjs` lists the changed paths and picks the lanes below. Prose, `Design/`, `marfa/` and repository metadata run none. |
+| Editor | `editor/` changed | Typecheck, test and build the editor on Linux. |
+| App | Anything that can change the app | Release tag rules, generated-project check, the Native plan with window suites, and a Release build. |
+| UI UIEditor, UI UIShell, UI UISettings | Anything that can change what the UI tests drive, and the pull request is not a draft | One job per plan, in parallel. |
+
+A failing lane uploads its logs and `.xcresult` bundles for seven days. Passing runs upload nothing.
+
+Public pull requests use hosted CI. Do not attach personal persistent runners. Required CI must pass before merging; native interaction checks are also needed for changes to focus, save, rename, close, or window behavior.
+
+### CI runtime
+
+Before the lane split (30 October 2026), one `App` job ran everything:
+
+| | Before |
+| --- | --- |
+| Per pull request | About 37 min |
+| After merge | The same job again on `main`, about 35 min |
+| UI tests | 27 min for about 40 tests and 48 app launches |
+| Unit tests | 183 cases in 3 s |
+
+After the lane split: to be recorded from the first hosted run.

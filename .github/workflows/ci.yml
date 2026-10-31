@@ -1,25 +1,66 @@
 name: CI
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-    inputs:
-      window_tests:
-        description: Run suites that open windows on the disposable hosted runner
-        type: boolean
-        default: true
 permissions:
   contents: read
+# A new push replaces the previous run of the same pull request. Manual runs never cancel.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      editor: ${{ steps.scope.outputs.editor }}
+      app: ${{ steps.scope.outputs.app }}
+      ui: ${{ steps.scope.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Test the scope rules
+        run: node --test scripts/ci-scope.test.mjs
+      - name: Decide lanes
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-scope.mjs
+
+  editor:
+    name: Editor
+    needs: changes
+    if: needs.changes.outputs.editor == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '26'
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: editor/package.json
+      - name: Check editor
+        working-directory: editor
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm build
+
   app:
     name: App
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     # GitHub-hosted macOS 27 image: actions/runner-images issue 14404.
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Validate distribution tag rules
@@ -37,76 +78,94 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: editor/package.json
-      - name: Check editor
-        working-directory: editor
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm typecheck
-          pnpm test
-          pnpm build
       - name: Verify generated project
         run: |
           xcodegen generate
           git diff --exit-code -- Pad.xcodeproj App/Info.plist App/Pad.entitlements
           test -z "$(git ls-files --others --exclude-standard Pad.xcodeproj App/Info.plist App/Pad.entitlements)"
+      # The Native plan runs the unit suites and, because the runner is disposable, the suites that open windows.
       - name: Build and test
-        env:
-          TEST_RUNNER_PAD_WINDOW_TESTS: ${{ github.event_name != 'workflow_dispatch' && '1' || (inputs.window_tests && '1' || '') }}
-        run: |
-          set -o pipefail
-          xcodebuild -project Pad.xcodeproj -scheme Pad -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath build/CI \
-            -resultBundlePath build/Tests.xcresult -parallel-testing-enabled NO \
-            -skip-testing:PadTests/PanelTests -skip-testing:PadTests/FilenameInputTests -skip-testing:PadTests/MarkdownBridgeTests \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test | tee build.log
-      - name: Test native windows sequentially
-        if: github.event_name != 'workflow_dispatch' || inputs.window_tests
         env:
           TEST_RUNNER_PAD_WINDOW_TESTS: '1'
         run: |
           set -o pipefail
-          for suite in FilenameInputTests PanelTests MarkdownBridgeTests; do
-            xcodebuild -project Pad.xcodeproj -scheme Pad -configuration Debug \
-              -destination 'platform=macOS' -derivedDataPath build/CI \
-              -resultBundlePath "build/$suite.xcresult" -parallel-testing-enabled NO \
-              "-only-testing:PadTests/$suite" \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test | tee -a build.log
-          done
-      - name: Test editor interactions
-        if: github.event_name != 'workflow_dispatch' || inputs.window_tests
-        timeout-minutes: 30
-        run: |
-          set -o pipefail
-          sudo /usr/sbin/DevToolsSecurity -enable
-          xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tests' -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath build/UI \
-            -resultBundlePath build/EditorUI.xcresult -parallel-testing-enabled NO \
-            -only-testing:PadUITests/MarkdownUITests/testFormattingMenuPreservesSelectionAndEditorLayout \
-            -only-testing:PadUITests/MarkdownUITests/testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory \
-            -only-testing:PadUITests/MarkdownUITests/testInkKit012NativeTableBreaksPunctuationAndLayout \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test | tee -a build.log
-      - name: Test remaining application interactions
-        if: github.event_name != 'workflow_dispatch' || inputs.window_tests
-        timeout-minutes: 30
-        run: |
-          set -o pipefail
-          xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tests' -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath build/UI \
-            -resultBundlePath build/UI.xcresult -parallel-testing-enabled NO \
-            -skip-testing:PadUITests/MarkdownUITests/testFormattingMenuPreservesSelectionAndEditorLayout \
-            -skip-testing:PadUITests/MarkdownUITests/testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory \
-            -skip-testing:PadUITests/MarkdownUITests/testInkKit012NativeTableBreaksPunctuationAndLayout \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test | tee -a build.log
+          xcodebuild -project Pad.xcodeproj -scheme Pad -testPlan Native -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath build/CI \
+            -resultBundlePath build/Native.xcresult -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test | tee build.log
       - name: Build Release
         run: |
           xcodebuild -project Pad.xcodeproj -scheme Pad -configuration Release \
             -destination 'platform=macOS' -derivedDataPath build/CI \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
-          name: test-results
-          retention-days: 3
+          name: app-results
+          retention-days: 7
           path: |
             build.log
             build/*.xcresult
+
+  ui:
+    name: UI ${{ matrix.plan }}
+    needs: changes
+    # Draft pull requests run the fast lanes only.
+    if: needs.changes.outputs.ui == 'true' && github.event.pull_request.draft != true
+    runs-on: xcode-27
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plan: [UIEditor, UIShell, UISettings]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify toolchain
+        run: |
+          xcodebuild -version | head -1 | grep -E '^Xcode 27([.]|$)'
+          test "$(sw_vers -productVersion | cut -d. -f1)" = 27
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '26'
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: editor/package.json
+      # The runner is a disposable GUI session, which the UI tests require.
+      - name: Test ${{ matrix.plan }}
+        env:
+          TEST_RUNNER_PAD_UI_TESTS: '1'
+        run: |
+          set -o pipefail
+          sudo /usr/sbin/DevToolsSecurity -enable
+          xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tests' -testPlan ${{ matrix.plan }} -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath build/UI \
+            -resultBundlePath build/${{ matrix.plan }}.xcresult -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test | tee build.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ui-results-${{ matrix.plan }}
+          retention-days: 7
+          path: |
+            build.log
+            build/*.xcresult
+
+  result:
+    name: CI result
+    needs: [changes, editor, app, ui]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A lane that its scope skipped passes. A failed, cancelled or missing lane does not.
+      - name: Check lanes
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Lane results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "A lane finished as $result."; exit 1 ;;
+            esac
+          done

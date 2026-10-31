@@ -394,8 +394,8 @@ describe("native bridge facade", () => {
   });
 
   it.each(["paste", "drop"])(
-    "declines image %s before inserting a placeholder and permits explicit plain text",
-    (type) => {
+    "refuses image %s without an adapter and permits explicit plain text",
+    async (type) => {
       const generation = type === "paste" ? 84 : 85;
       facade.load("Keep this", generation, "image-refusal");
       const root = document.getElementById("editor")!;
@@ -403,6 +403,7 @@ describe("native bridge facade", () => {
       const data = {
         files: [new File(["fixture"], "picture.png", { type: "image/png" })],
         items: [],
+        types: ["Files"],
         getData: () => "",
       };
       Object.defineProperty(
@@ -412,8 +413,11 @@ describe("native bridge facade", () => {
       );
       root.querySelector('[contenteditable="true"]')!.dispatchEvent(event);
       expect(event.defaultPrevented).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(facade.snapshot(generation).text).toBe("Keep this");
-      expect(latest("imagesDisabled")).toMatchObject({
+      expect(latest("editorWarning")).toMatchObject({
+        code: "image-unsupported",
+        source: "edit",
         documentId: "image-refusal",
         generation,
       });
@@ -422,25 +426,12 @@ describe("native bridge facade", () => {
     },
   );
 
-  it("declines mixed image HTML without inserting or rewriting its text", () => {
-    facade.load("Keep this", 86, "mixed-image");
-    const event = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clipboardData", {
-      value: {
-        files: [],
-        items: [],
-        getData: (kind: string) =>
-          kind === "text/html"
-            ? '<p>Copied text<img src="private.png"></p>'
-            : "Copied text",
-      },
-    });
-    document.getElementById("editor")!.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(true);
-    expect(facade.snapshot(86).text).toBe("Keep this");
-    expect(latest("imagesDisabled")).toMatchObject({
-      documentId: "mixed-image",
-      generation: 86,
-    });
+  it("normalizes typed link addresses with InkKit", () => {
+    facade.load("plain", 87, "links");
+    expect(facade.linkContext(87).href).toBeNull();
+    expect(facade.normalizeLink(" example.com:8080 ")).toBe(
+      "https://example.com:8080",
+    );
+    expect(facade.normalizeLink("javascript:alert(1)")).toBeNull();
   });
 });

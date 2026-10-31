@@ -17,7 +17,7 @@ packages:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: "3.1.0"
   # Keep at the same version as @aicayzer/inkkit in editor/package.json.
-  InkKitRTF: { url: https://github.com/aicayzer/inkkit, exactVersion: "0.6.1" }
+  InkKitRTF: { url: https://github.com/aicayzer/inkkit, exactVersion: "0.7.1" }
 settings:
   base:
     SWIFT_VERSION: "6.0"

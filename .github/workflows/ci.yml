@@ -107,8 +107,8 @@ jobs:
             build.log
             build/*.xcresult
 
+  # A skipped matrix job shows under its plain id, without a plan, so the job has no name of its own.
   ui:
-    name: UI ${{ matrix.plan }}
     needs: changes
     # Draft pull requests run the fast lanes only.
     if: needs.changes.outputs.ui == 'true' && github.event.pull_request.draft != true

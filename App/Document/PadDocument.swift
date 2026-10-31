@@ -95,7 +95,11 @@ final class PadDocument {
     private var pendingReadingDocumentID: UUID?
     private(set) var documentID = UUID()
     var text = "" {
-        didSet { if currentFormat == .txt { recordDiagnostic(.edit) } }
+        didSet {
+            guard currentFormat == .txt else { return }
+            recordDiagnostic(.edit)
+            if editorFeedback?.source == .edit { editorFeedback = nil }
+        }
     }
     private(set) var savedText = ""
     var isActive = false
@@ -350,6 +354,11 @@ final class PadDocument {
         // Native WebKit ownership during mounting does not establish editing intent.
         if editor.ownsFirstResponder { panel.prepareReading() }
         return true
+    }
+
+    /// Plain text can't keep an image, so a paste or drop of only an image changes nothing and says so.
+    func refuseImage() {
+        editorFeedback = PadMarkdownEditorFeedback(code: "image-unsupported", source: .edit)
     }
 
     /// Clicking the message pill clears the problem it shows: a document error first, then editor feedback.

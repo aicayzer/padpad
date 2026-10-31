@@ -4,6 +4,8 @@ import SwiftUI
 struct PadPlainTextEditorView: NSViewRepresentable {
     @Binding var text: String
     var maxColumnWidth: CGFloat? = nil
+    /// Called when a paste or drop holds only an image, which plain text can't keep.
+    var onImageRefused: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
@@ -14,6 +16,8 @@ struct PadPlainTextEditorView: NSViewRepresentable {
         scroll.drawsBackground = false
 
         let editor = Self.makeTextView()
+        editor.onImageRefused = { [weak coordinator = context.coordinator] in coordinator?.onImageRefused() }
+        context.coordinator.onImageRefused = onImageRefused
         editor.isRichText = false
         editor.importsGraphics = false
         editor.allowsUndo = true
@@ -37,7 +41,7 @@ struct PadPlainTextEditorView: NSViewRepresentable {
         return scroll
     }
 
-    static func makeTextView() -> NSTextView {
+    static func makeTextView() -> PadPlainTextView {
         let content = NSTextContentStorage()
         let layout = PadTextSelectionLayoutManager()
         content.addTextLayoutManager(layout)
@@ -48,6 +52,7 @@ struct PadPlainTextEditorView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.onImageRefused = onImageRefused
         (scroll as? PadPlainTextScrollView)?.maxColumnWidth = maxColumnWidth
         guard let editor = scroll.documentView as? NSTextView, editor.string != text else { return }
         editor.string = text
@@ -56,6 +61,7 @@ struct PadPlainTextEditorView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var onImageRefused: () -> Void = {}
         init(text: Binding<String>) { self.text = text }
 
         func textDidChange(_ notification: Notification) {
@@ -65,7 +71,60 @@ struct PadPlainTextEditorView: NSViewRepresentable {
     }
 }
 
-private final class PadPlainTextView: NSTextView {
+/// Whether a paste or drop holds only an image. Text that comes with an image is pasted as usual.
+enum PadPlainTextImage {
+    static func isImageOnly(_ pasteboard: NSPasteboard) -> Bool {
+        let types = pasteboard.types ?? []
+        guard !types.contains(.string) else { return false }
+        return NSImage.canInit(with: pasteboard)
+    }
+}
+
+final class PadPlainTextView: NSTextView {
+    /// Reports a refused image so the host can show its message.
+    var onImageRefused: () -> Void = {}
+
+    override func paste(_ sender: Any?) {
+        if refuseImage(in: .general) { return }
+        super.paste(sender)
+    }
+
+    // The text view disables Paste when it can read nothing on the pasteboard, which would swallow an image-only paste silently.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(NSText.paste(_:)), PadPlainTextImage.isImageOnly(.general) { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(NSText.paste(_:)), PadPlainTextImage.isImageOnly(.general) { return true }
+        return super.validateMenuItem(item)
+    }
+
+    override func pasteAsPlainText(_ sender: Any?) {
+        if refuseImage(in: .general) { return }
+        super.pasteAsPlainText(sender)
+    }
+
+    // The text view declines a drop it can't read, so accept an image-only drop here and refuse it on release.
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        PadPlainTextImage.isImageOnly(sender.draggingPasteboard) ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        PadPlainTextImage.isImageOnly(sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if refuseImage(in: sender.draggingPasteboard) { return false }
+        return super.performDragOperation(sender)
+    }
+
+    private func refuseImage(in pasteboard: NSPasteboard) -> Bool {
+        guard PadPlainTextImage.isImageOnly(pasteboard) else { return false }
+        onImageRefused()
+        return true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty else { return }

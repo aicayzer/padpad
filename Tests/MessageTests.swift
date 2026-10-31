@@ -89,7 +89,7 @@ import Testing
         }
         for source in [PadMarkdownEditorFeedback.Source.edit, .clipboard, .print] {
             for code in ["preservation", "composition", "not-ready", "operation-pending", "read-only", "stale-document",
-                         "image-unavailable", "file-unavailable", "diagram-unavailable", "unknown"] {
+                         "image-unavailable", "image-unsupported", "file-unavailable", "diagram-unavailable", "unknown"] {
                 let message = PadMarkdownEditorFeedback(code: code, source: source).message
                 words += [message.text, message.hint].compactMap(\.self)
             }
@@ -254,6 +254,23 @@ import Testing
         #expect(alerts.alerts.count == 1)
         #expect(document.error == nil)
         #expect(document.notice == nil)
+    }
+
+    @Test func refusedPlainTextImageShowsOneSmallProblemUntilTheTextChanges() throws {
+        let fixture = try MessageFixture()
+        defer { fixture.cleanUp() }
+        let document = PadDocument(defaults: fixture.defaults, defaultFolder: fixture.root, presentsWindow: false)
+        document.text = "Keep this"
+        document.refuseImage()
+        #expect(document.editorFeedback == PadMarkdownEditorFeedback(code: "image-unsupported", source: .edit))
+        #expect(document.editorFeedback?.message.text == "Images aren’t supported.")
+        #expect(document.text == "Keep this")
+        #expect(document.alert == nil)
+        document.dismissMessage()
+        #expect(document.editorFeedback == nil)
+        document.refuseImage()
+        document.text = "Keep this, edited"
+        #expect(document.editorFeedback == nil)
     }
 
     @Test func headlessDocumentsAnswerAlertsWithoutShowingThem() throws {

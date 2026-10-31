@@ -393,11 +393,16 @@ describe("native bridge facade", () => {
     ]);
   });
 
-  it.each(["paste", "drop"])(
-    "refuses image %s without an adapter and permits explicit plain text",
-    async (type) => {
-      const generation = type === "paste" ? 84 : 85;
+  it.each([
+    ["paste", "formatted", 84],
+    ["drop", "formatted", 85],
+    ["paste", "source", 86],
+    ["drop", "source", 87],
+  ])(
+    "refuses image %s in %s mode without an adapter and permits explicit plain text",
+    async (type, mode, generation) => {
       facade.load("Keep this", generation, "image-refusal");
+      if (mode === "source") facade.setEditingMode("source", generation);
       const root = document.getElementById("editor")!;
       const event = new Event(type, { bubbles: true, cancelable: true });
       const data = {
@@ -411,7 +416,11 @@ describe("native bridge facade", () => {
         type === "paste" ? "clipboardData" : "dataTransfer",
         { value: data },
       );
-      root.querySelector('[contenteditable="true"]')!.dispatchEvent(event);
+      (
+        root.querySelector(
+          mode === "source" ? "textarea" : '[contenteditable="true"]',
+        ) as Element
+      ).dispatchEvent(event);
       expect(event.defaultPrevented).toBe(true);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(facade.snapshot(generation).text).toBe("Keep this");
@@ -427,8 +436,8 @@ describe("native bridge facade", () => {
   );
 
   it("normalizes typed link addresses with InkKit", () => {
-    facade.load("plain", 87, "links");
-    expect(facade.linkContext(87).href).toBeNull();
+    facade.load("plain", 88, "links");
+    expect(facade.linkContext(88).href).toBeNull();
     expect(facade.normalizeLink(" example.com:8080 ")).toBe(
       "https://example.com:8080",
     );

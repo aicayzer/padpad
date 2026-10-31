@@ -64,7 +64,9 @@ TEST_RUNNER_PAD_UI_TESTS=1 xcodebuild -project Pad.xcodeproj -scheme 'Pad UI Tes
 
 UI tests launch the Debug build, `PadPad Dev` (`me.cyzr.pad.dev`), with its own preferences, shortcut and icon, and a test confirms this identity. UI tests launch the app with macOS inline predictions off (`UITests/UITestSupport.swift`), because the prediction panel consumes synthesized key events and can duplicate a typed character. Use disposable files, never personal documents.
 
-XCTest waits about ten seconds for an application it did not launch, such as Finder, each time a test sends it a key; the first event after a SwiftUI menu opens costs about the same. Press shortcuts through `FinderKeyboard` only in tests that need Finder in front, and prefer `app.typeKey` otherwise. Posting `CGEvent` keys would avoid the wait, but needs Accessibility access that the test runner lacks.
+XCTest waits about ten seconds for an application it did not launch, such as Finder, each time a test sends it a key that the application does not receive; the first event after a SwiftUI menu opens costs about the same. A global shortcut is consumed by the hotkey system, and a plain key goes to the quick pad's key panel while it is visible, so neither reaches Finder and XCTest waits for Finder to idle. No setting removes the wait. Each global-shortcut press therefore costs about ten seconds: keep one only where the test must prove the shortcut, merge show and hide cycles, open drafts with `app.typeKey("n", modifierFlags: .command)` and send plain keys to the app, not to Finder. Press shortcuts through `FinderKeyboard` only in tests that need Finder in front. Posting `CGEvent` keys would avoid the wait, but needs Accessibility access that the test runner lacks.
+
+`GlobalShortcutUITests` opens a Finder window titled `pad-shortcut-cover-<id>` to cover the quick pad. It closes any such window by title before and after each test, so a leftover cannot cover the pad in later tests.
 
 Screenshots attach with `deleteOnSuccess`, so a passing run keeps no images.
 
@@ -77,7 +79,7 @@ Workflow `CI` runs on pull requests, not on pushes to `main`. A superseded run i
 | Changes | Always | `scripts/ci-scope.mjs` lists the changed paths and picks the lanes below. Prose, `Design/`, `marfa/` and repository metadata run none. |
 | Editor | `editor/` changed | Typecheck, test and build the editor on Linux. |
 | App | Anything that can change the app | Release tag rules, generated-project check, the Native plan with window suites, and a Release build. |
-| UI UIEditor, UI UIShell, UI UISettings | Anything that can change what the UI tests drive, and the pull request is not a draft | One job per plan, in parallel. |
+| ui (UIEditor), ui (UIShell), ui (UISettings) | Anything that can change what the UI tests drive, and the pull request is not a draft | One job per plan, in parallel. |
 
 A failing lane uploads its logs and `.xcresult` bundles for seven days. Passing runs upload nothing.
 
@@ -94,4 +96,10 @@ Before the lane split (30 October 2026), one `App` job ran everything:
 | UI tests | 27 min for about 40 tests and 48 app launches |
 | Unit tests | 183 cases in 3 s |
 
-After the lane split: to be recorded from the first hosted run.
+After the lane split:
+
+| | After |
+| --- | --- |
+| Per pull request | About 12 min wall time: App about 3 min, and the three UI shards about 11 to 12 min in parallel |
+| Documentation-only pull request | No build runs |
+| After merge | No second run on `main` |

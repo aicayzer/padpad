@@ -3,9 +3,21 @@ import XCTest
 
 @MainActor
 final class GlobalShortcutUITests: PadUITestCase {
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        FinderKeyboard.closeWindows(titledWithPrefix: Self.coverPrefix)
+    }
+
+    override func tearDownWithError() throws {
+        FinderKeyboard.closeWindows(titledWithPrefix: Self.coverPrefix)
+        try super.tearDownWithError()
+    }
+
+    private static let coverPrefix = "pad-shortcut-cover-"
+
     func testGlobalShortcutOpensAboveAnotherApplicationWithoutActivating() throws {
         continueAfterFailure = false
-        let directory = FileManager.default.temporaryDirectory.appending(path: "pad-shortcut-cover-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let directory = FileManager.default.temporaryDirectory.appending(path: "\(Self.coverPrefix)\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
         let cover = finder.windows[directory.lastPathComponent]
@@ -21,15 +33,7 @@ final class GlobalShortcutUITests: PadUITestCase {
                 abs(left.width - right.width) < 2 && abs(left.height - right.height) < 2
         }
         var ownedWindowID: Int?
-        defer {
-            if let ownedWindowID,
-               let info = visibleWindows().first(where: { $0[kCGWindowNumber as String] as? Int == ownedWindowID }),
-               let frame = bounds(of: info),
-               let window = finder.windows.allElementsBoundByIndex.first(where: { sameFrame($0.frame, frame) }) {
-                window.buttons["_XCUI:CloseWindow"].click()
-            }
-            try? FileManager.default.removeItem(at: directory)
-        }
+        defer { try? FileManager.default.removeItem(at: directory) }
         let app = XCUIApplication()
         app.launchArguments = ["-pad.onboardingCompleted", "YES", "-pad.format", "txt",
                                "-pad.saveAutomatically", "NO", "-pad.floating", "YES",
@@ -88,7 +92,7 @@ final class GlobalShortcutUITests: PadUITestCase {
         let editor = app.textViews.firstMatch
         let close = app.buttons["Close PadPad"].firstMatch
         XCTAssertFalse(close.exists)
-        for cycle in 1...3 {
+        for cycle in 1...2 {
             FinderKeyboard.press("b", [.option, .shift])
             XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
             XCTAssertTrue(coverFrame.intersects(editor.frame), "The disposable Finder window must overlap the editor")
@@ -105,8 +109,9 @@ final class GlobalShortcutUITests: PadUITestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [ordering], timeout: 5), .completed,
                            "The quick pad must be above the overlapping foreground window")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
-            // Synthesize through the foreground app without activating or clicking PadPad.
-            FinderKeyboard.press("a")
+            // Type through PadPad itself: a plain key sent to Finder would reach the pad's key panel instead,
+            // and XCTest would wait for Finder to idle. The app stays in the background.
+            app.typeKey("a", modifierFlags: [])
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", String(repeating: "a", count: cycle)), object: editor)
             XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 5), .completed, "Typing must reach the pad without a click")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
@@ -681,20 +686,21 @@ final class PadUITests: PadUITestCase {
         finder.activate()
         XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
         let close = app.buttons["Close PadPad"].firstMatch
-        for iteration in 1...3 {
+        // Two opening cycles show the Dock stays clean on repeat; the second one stays open for Settings.
+        func summonByShortcut(_ iteration: Int) {
             FinderKeyboard.press("b", [.control, .option, .command])
             let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: close)
             XCTAssertEqual(XCTWaiter.wait(for: [shown], timeout: 5), .completed, app.debugDescription)
             expectValue(draft, in: editor)
             checkDock("shortcut opened \(iteration)")
-            FinderKeyboard.press("b", [.control, .option, .command])
-            let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR hittable == false"), object: close)
-            XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, app.debugDescription)
-            XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
-            checkDock("shortcut hidden \(iteration)")
         }
+        summonByShortcut(1)
         FinderKeyboard.press("b", [.control, .option, .command])
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR hittable == false"), object: close)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, app.debugDescription)
+        XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5))
+        checkDock("shortcut hidden 1")
+        summonByShortcut(2)
         app.typeKey(",", modifierFlags: .command)
         let settings = app.windows["com_apple_SwiftUI_Settings_window"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
@@ -776,7 +782,8 @@ final class PadUITests: PadUITestCase {
         defer { app.terminate() }
         let close = app.buttons["Close PadPad"].firstMatch
         XCTAssertFalse(close.exists)
-        FinderKeyboard.pressAfterActivating("b", [.option, .shift])
+        // Open the first draft from the app's own menu: only the reopening below needs the global shortcut.
+        app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(close.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.menuButtons["formattingMenu"].firstMatch.waitForExistence(timeout: 10))
         app.typeText("Retained Markdown")

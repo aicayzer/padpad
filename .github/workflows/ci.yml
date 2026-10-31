@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Test the scope rules
-        run: node --test scripts/
+        run: node --test scripts/ci-scope.test.mjs
       - name: Decide lanes
         id: scope
         env:

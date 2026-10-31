@@ -147,9 +147,11 @@ schemes:
         PadUITests: [test]
     test:
       config: Debug
-      targets:
-        - name: PadUITests
-          parallelizable: false
+      testPlans:
+        - path: TestPlans/UIEditor.xctestplan
+          defaultPlan: true
+        - path: TestPlans/UIShell.xctestplan
+        - path: TestPlans/UISettings.xctestplan
   Pad:
     build:
       targets:
@@ -159,8 +161,8 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets:
-        - name: PadTests
-          parallelizable: false
+      testPlans:
+        - path: TestPlans/Native.xctestplan
+          defaultPlan: true
     archive:
       config: Release

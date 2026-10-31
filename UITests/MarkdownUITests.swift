@@ -3,7 +3,7 @@ import InkKitRTF
 import XCTest
 
 @MainActor
-final class MarkdownUITests: XCTestCase {
+final class MarkdownUITests: PadUITestCase {
     func testCompactFindDisclosureReplacementAndNewDraft() throws {
         let previousClipboard = captureClipboard()
         defer { restoreClipboard(previousClipboard) }
@@ -358,7 +358,7 @@ final class MarkdownUITests: XCTestCase {
             if restored != original {
                 let evidence = XCTAttachment(string: "Expected: \(String(reflecting: original))\nActual: \(String(reflecting: restored))")
                 evidence.name = "Exact Markdown after reopen cycle \(cycle)"
-                evidence.lifetime = .keepAlways
+                evidence.lifetime = .deleteOnSuccess
                 add(evidence)
             }
             XCTAssertEqual(restored, original, "Authored spacing changed on reopen cycle \(cycle)")
@@ -513,7 +513,7 @@ final class MarkdownUITests: XCTestCase {
         attach(fileWindow.screenshot(), name: "Edited Markdown reopened with separate soft-break lines")
     }
 
-    func testInkKit012BlockMovesRespectNativeFieldsAndEditMenuHistory() throws {
+    func testEditMenuHistoryMovesBlocksWhileFindAndLinkFieldsKeepNativeEditing() throws {
         let previousClipboard = captureClipboard()
         defer { restoreClipboard(previousClipboard) }
         let app = launchPad()
@@ -564,7 +564,7 @@ final class MarkdownUITests: XCTestCase {
         copyMarkdown(app, expecting: "Second\n\nFirst\n\nThird")
     }
 
-    func testInkKit012NativeTableBreaksPunctuationAndLayout() throws {
+    func testTypedTablesAndSoftBreaksRoundTripThroughCopyAsMarkdown() throws {
         let app = launchPad()
         defer { app.terminate() }
         waitForEditor(app)
@@ -792,12 +792,5 @@ final class MarkdownUITests: XCTestCase {
             (try? String(contentsOf: file, encoding: .utf8).contains(text)) == true
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 5), .completed, "Saved Markdown did not contain \(text)")
-    }
-
-    private func attach(_ screenshot: XCUIScreenshot, name: String) {
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }

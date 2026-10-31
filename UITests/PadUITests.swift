@@ -109,9 +109,9 @@ final class GlobalShortcutUITests: PadUITestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [ordering], timeout: 5), .completed,
                            "The quick pad must be above the overlapping foreground window")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)
-            // Type through PadPad itself: a plain key sent to Finder would reach the pad's key panel instead,
-            // and XCTest would wait for Finder to idle. The app stays in the background.
-            app.typeKey("a", modifierFlags: [])
+            // Synthesize through the foreground app without activating or clicking PadPad. Sending the key to
+            // PadPad would activate it, so this keeps XCTest's wait for Finder to idle.
+            FinderKeyboard.press("a")
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", String(repeating: "a", count: cycle)), object: editor)
             XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 5), .completed, "Typing must reach the pad without a click")
             XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, finderPID)

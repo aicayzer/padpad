@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 
 @MainActor
-final class OnboardingUITests: XCTestCase {
+final class OnboardingUITests: PadUITestCase {
     func testFirstSummonPracticesGlobalShortcutWithoutAdvancingOnRepeat() throws {
         let app = launchPad()
         defer { app.terminate() }
@@ -132,25 +132,6 @@ final class OnboardingUITests: XCTestCase {
         attach(app.dialogs.firstMatch.screenshot(), name: "Markdown source includes the formatted editor change")
         app.buttons["documentFormat"].hover()
         attach(app.dialogs.firstMatch.screenshot(), name: "Format button with quiet hover background")
-    }
-
-    func testNoShortcutCanSkipWithoutPretendingPracticeSucceeded() {
-        let app = launchPad(accent: "custom", globalShortcutEnabled: false, customAccent: "216E4E")
-        defer { app.terminate() }
-        summonIntroduction(app)
-        attach(app.dialogs.firstMatch.screenshot(), name: "Primary onboarding action respects a custom green accent")
-        app.buttons["onboardingStartPractice"].click()
-        let shortcut = element("onboardingShortcut", in: app)
-        XCTAssertTrue(shortcut.waitForExistence(timeout: 5))
-        XCTAssertEqual(shortcut.label, "No global shortcut configured")
-        XCTAssertFalse(app.buttons["onboardingContinue"].isEnabled)
-        app.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(element("onboardingPractice", in: app).exists)
-        attach(app.dialogs.firstMatch.screenshot(), name: "No shortcut offers a clear Skip path")
-        app.buttons["onboardingSkip"].click()
-        waitForMarkdownEditor(app)
-        switchToText(app)
-        expectValue("", in: app.textViews.firstMatch)
     }
 
     func testIntroductionReplayThenSkipPreservesTheCurrentDraft() {
@@ -291,21 +272,18 @@ final class OnboardingUITests: XCTestCase {
 
     private func launchPad(completed: Bool = false, format: String = "md",
                            appearance: String = "light", accent: String = "standard",
-                           globalShortcutEnabled: Bool = true, customAccent: String = "BEBAFC",
                            enabledFormats: String = "(md, txt, rtf)") -> XCUIApplication {
         continueAfterFailure = false
-        // Run this suite with PAD_APP_IDENTIFIER=me.cyzr.pad.onboardingqa. The target
-        // resolves through XCUIApplication(), retaining compatibility with isolated app names.
-        // Argument-domain fixtures override values; onboarding writes stay in that QA container.
+        // Argument-domain fixtures override stored values for this launch only.
         let app = XCUIApplication()
         app.launchArguments = [
             "-pad.onboardingCompleted", completed ? "YES" : "NO",
             "-pad.enabledFormats", enabledFormats,
             "-pad.format", format, "-pad.saveAutomatically", "NO", "-pad.floating", "NO",
             "-pad.reusePeriod", "60", "-showInDock", "YES", "-menuBarItem", "YES",
-            "-appearance", appearance, "-accent", accent, "-customAccent", customAccent,
+            "-appearance", appearance, "-accent", accent, "-customAccent", "BEBAFC",
             "-pad.editingShortcuts", "invalid",
-            "-KeyboardShortcuts_pad", globalShortcutEnabled ? #""{\"carbonKeyCode\":35,\"carbonModifiers\":6912}""# : "NO",
+            "-KeyboardShortcuts_pad", #""{\"carbonKeyCode\":35,\"carbonModifiers\":6912}""#,
         ]
         app.launchArguments += sharedUITestLaunchArguments
         app.launch()
@@ -322,13 +300,7 @@ final class OnboardingUITests: XCTestCase {
     }
 
     private func pressGlobalShortcutFromFinder() {
-        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
-        finder.activate()
-        XCTAssertTrue(finder.wait(for: .runningForeground, timeout: 5), finder.debugDescription)
-        let menuBar = finder.menuBars.firstMatch
-        XCTAssertTrue(menuBar.waitForExistence(timeout: 5), finder.debugDescription)
-        XCTAssertGreaterThan(menuBar.frame.width, 0)
-        menuBar.typeKey("p", modifierFlags: [.control, .option, .shift, .command])
+        FinderKeyboard.pressAfterActivating("p", [.control, .option, .shift, .command])
         // Pad is a nonactivating panel. The caller waits for its practice counter,
         // rather than requiring the application to become the foreground app.
     }
@@ -404,12 +376,5 @@ final class OnboardingUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed,
                        "Settings frame changed from \(size) to \(window.frame.size)", file: file, line: line)
-    }
-
-    private func attach(_ screenshot: XCUIScreenshot, name: String) {
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }

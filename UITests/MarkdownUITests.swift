@@ -52,17 +52,55 @@ final class MarkdownUITests: PadUITestCase {
         defer { app.terminate() }
         waitForEditor(app)
         paste("Keep this text", into: app)
-        let picture = NSImage(size: NSSize(width: 2, height: 2), flipped: false) { bounds in
-            NSColor.red.setFill(); bounds.fill(); return true
-        }
-        NSPasteboard.general.clearContents()
-        XCTAssertTrue(NSPasteboard.general.writeObjects([picture]))
-        app.typeKey("v", modifierFlags: .command)
-        let feedback = app.buttons["editorFeedback"].firstMatch
-        XCTAssertTrue(feedback.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(feedback.label.contains("Images aren’t supported."))
+        pasteImage(into: app)
+        expectUnsupportedImageFeedback(in: app)
         copyMarkdown(app, expecting: "Keep this text")
         attach(app.screenshot(), name: "Unsupported image paste feedback")
+    }
+
+    func testImagePasteInMarkdownSourceModeLeavesDocumentUnchangedWithClearFeedback() throws {
+        let previousClipboard = captureClipboard()
+        defer { restoreClipboard(previousClipboard) }
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        paste("Keep this text", into: app)
+        app.menuBars.menuBarItems["Format"].click()
+        app.menuItems["Markdown Source"].firstMatch.click()
+        pasteImage(into: app)
+        expectUnsupportedImageFeedback(in: app)
+        copyMarkdown(app, expecting: "Keep this text")
+        attach(app.screenshot(), name: "Unsupported image paste feedback in source mode")
+    }
+
+    func testImagePasteInPlainTextLeavesDocumentUnchangedWithClearFeedback() throws {
+        let previousClipboard = captureClipboard()
+        defer { restoreClipboard(previousClipboard) }
+        let app = launchPad()
+        defer { app.terminate() }
+        waitForEditor(app)
+        app.chooseFormat("Plain Text")
+        let plain = app.textViews.firstMatch
+        XCTAssertTrue(plain.waitForExistence(timeout: 5), app.debugDescription)
+        paste("Keep this text", into: app)
+        pasteImage(into: app)
+        expectUnsupportedImageFeedback(in: app)
+        XCTAssertEqual(plain.value as? String, "Keep this text")
+        attach(app.screenshot(), name: "Unsupported image paste feedback in plain text")
+        // Typing clears the problem, and text that comes with an image pastes as usual.
+        app.typeText("!")
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+                                                object: app.buttons["editorFeedback"].firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [cleared], timeout: 5), .completed, app.debugDescription)
+        let picture = testPicture()
+        NSPasteboard.general.clearContents()
+        XCTAssertTrue(NSPasteboard.general.writeObjects([picture, " and a caption" as NSString]))
+        app.typeKey("v", modifierFlags: .command)
+        let pasted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (plain.value as? String) == "Keep this text! and a caption"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [pasted], timeout: 5), .completed, plain.value as? String ?? "")
+        XCTAssertFalse(app.buttons["editorFeedback"].firstMatch.exists)
     }
 
     func testExistingFileReadsUntilClickWhileNewScratchComposes() throws {
@@ -744,6 +782,24 @@ final class MarkdownUITests: PadUITestCase {
         let toggle = surface.menuButtons["formattingMenu"].firstMatch
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: toggle)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed, app.debugDescription)
+    }
+
+    private func testPicture() -> NSImage {
+        NSImage(size: NSSize(width: 2, height: 2), flipped: false) { bounds in
+            NSColor.red.setFill(); bounds.fill(); return true
+        }
+    }
+
+    private func pasteImage(into app: XCUIApplication) {
+        NSPasteboard.general.clearContents()
+        XCTAssertTrue(NSPasteboard.general.writeObjects([testPicture()]))
+        app.typeKey("v", modifierFlags: .command)
+    }
+
+    private func expectUnsupportedImageFeedback(in app: XCUIApplication) {
+        let feedback = app.buttons["editorFeedback"].firstMatch
+        XCTAssertTrue(feedback.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(feedback.label.contains("Images aren’t supported."), feedback.label)
     }
 
     private func paste(_ source: String, into app: XCUIApplication) {

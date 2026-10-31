@@ -603,7 +603,8 @@ struct PadView: View {
                             .onAppear { files.mountMarkdownEditor() }
                     }
                 } else {
-                    PadPlainTextEditorView(text: $files.text, maxColumnWidth: readingColumnWidth.map { CGFloat($0) })
+                    PadPlainTextEditorView(text: $files.text, maxColumnWidth: readingColumnWidth.map { CGFloat($0) },
+                                           onImageRefused: { files.refuseImage() })
                         .id(files.documentID)
                         .background(EditorFocusMount())
                         .focused($editing)

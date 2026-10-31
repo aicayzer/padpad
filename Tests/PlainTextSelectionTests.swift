@@ -116,6 +116,30 @@ struct PlainTextSelectionTests {
         #expect(editor.selectionRects().allSatisfy { $0.width < 100 })
     }
 
+    @Test func imageOnlyPasteboardIsRefusedAndTextWithAnImageIsKept() throws {
+        let picture = NSImage(size: NSSize(width: 2, height: 2), flipped: false) { bounds in
+            NSColor.red.setFill(); bounds.fill(); return true
+        }
+        let imageOnly = NSPasteboard(name: NSPasteboard.Name("pad.test.\(UUID().uuidString)"))
+        defer { imageOnly.releaseGlobally() }
+        imageOnly.clearContents()
+        #expect(imageOnly.writeObjects([picture]))
+        #expect(PadPlainTextImage.isImageOnly(imageOnly))
+
+        let withText = NSPasteboard(name: NSPasteboard.Name("pad.test.\(UUID().uuidString)"))
+        defer { withText.releaseGlobally() }
+        withText.clearContents()
+        #expect(withText.writeObjects([picture, "Caption" as NSString]))
+        #expect(!PadPlainTextImage.isImageOnly(withText))
+
+        let textOnly = NSPasteboard(name: NSPasteboard.Name("pad.test.\(UUID().uuidString)"))
+        defer { textOnly.releaseGlobally() }
+        textOnly.clearContents()
+        textOnly.setString("Plain", forType: .string)
+        #expect(!PadPlainTextImage.isImageOnly(textOnly))
+        #expect(!PadPlainTextImage.isImageOnly(NSPasteboard(name: NSPasteboard.Name("pad.test.\(UUID().uuidString)"))))
+    }
+
     @MainActor private final class UndoDelegate: NSObject, NSTextViewDelegate {
         let history = UndoManager()
         func undoManager(for view: NSTextView) -> UndoManager? { history }

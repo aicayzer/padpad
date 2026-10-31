@@ -69,6 +69,8 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     var allowsFocus = true
     var showingLink = false
     private(set) var linkRect: CGRect?
+    /// The address of the link at the caret, for the Link field to start from.
+    private(set) var linkAddress = ""
     var hasExternalMarkedText: () -> Bool = { false }
 
     @ObservationIgnored var clipboardWriter: (PadClipboardContents) throws -> Void = { try $0.write(to: .general) }
@@ -564,6 +566,7 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
             guard let self, self.generation == expectedGeneration else { return }
             if let error { self.report(error); return }
             let context = value as? [String: Any]
+            self.linkAddress = context?["href"] as? String ?? ""
             if let rect = context?["rect"] as? [String: Double],
                let left = rect["left"], let top = rect["top"],
                let width = rect["width"], let height = rect["height"] {
@@ -573,6 +576,14 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
             }
             self.showingLink = true
         }
+    }
+
+    /// InkKit's reading of what was typed in the Link field, or nil when it isn't an address it accepts.
+    func normalizedLink(_ input: String) async -> String? {
+        guard isReady else { return nil }
+        let value = try? await webView.callAsyncJavaScript("return window.editor.normalizeLink(input)",
+            arguments: ["input": input], in: nil, contentWorld: .page)
+        return value as? String
     }
 
     func format(_ command: PadMarkdownFormatCommand, argument: String? = nil) {
@@ -682,13 +693,9 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
                   message["documentId"] as? String == documentID?.uuidString,
                   let state = PadSearchState(message), state.query == searchText else { return }
             searchState = state
-        case "imagesDisabled":
-            guard message["generation"] as? Int == generation,
-                  message["documentId"] as? String == documentID?.uuidString else { return }
-            showFeedback(PadMarkdownEditorFeedback(code: "images-disabled", source: .edit))
         case "openLink":
-            guard let href = message["href"] as? String, let url = URL(string: href),
-                  let scheme = url.scheme?.lowercased(), ["https", "http", "mailto"].contains(scheme) else { return }
+            // The bridge has already applied InkKit's open policy.
+            guard let href = message["href"] as? String, let url = URL(string: href) else { return }
             NSWorkspace.shared.open(url)
         case "requestLink":
             presentLink()

@@ -13,7 +13,7 @@ protocol PadDiagnosticSource: AnyObject {
 
 /// Accepts only metadata described by the diagnostic schema. Never serialize bridge objects directly.
 enum PadDiagnosticSanitizer {
-    static let codes: Set<String> = ["not-ready", "stale-document", "composition", "operation-pending", "preservation", "invalid-argument", "destroyed", "internal", "clipboard-unavailable", "diagram-unavailable", "image-unavailable", "read-only", "invalid-range", "file-unavailable", "slash-command-failed", "unsupported-format", "unavailable", "invalid-response", "script", "native"]
+    static let codes: Set<String> = ["not-ready", "stale-document", "composition", "operation-pending", "preservation", "invalid-argument", "destroyed", "internal", "clipboard-unavailable", "diagram-unavailable", "image-unavailable", "image-unsupported", "read-only", "invalid-range", "file-unavailable", "slash-command-failed", "unsupported-format", "unavailable", "invalid-response", "script", "native"]
     static let reasons: Set<String> = ["matching-budget", "source-location", "reopen-mismatch", "parse-refusal", "unexpected"]
 
     static func code(_ value: String?) -> String { value.flatMap { codes.contains($0) ? $0 : nil } ?? "native" }

@@ -242,12 +242,14 @@ private struct PadFormattingControlFrame: ViewModifier {
 struct PadMarkdownLinkPresenter: ViewModifier {
     @Bindable var editor: PadMarkdownEditorController
     @State private var linkURL = ""
+    @State private var validLink: String?
 
     func body(content: Content) -> some View {
         content
             .onChange(of: editor.showingLink) { _, showing in
-                if showing { linkURL = "" }
+                if showing { linkURL = editor.linkAddress }
             }
+            .task(id: linkURL) { validLink = await editor.normalizedLink(linkURL) }
             .popover(isPresented: $editor.showingLink, attachmentAnchor: editor.linkRect.map { .rect(.rect($0)) } ?? .rect(.bounds), arrowEdge: .top) {
                 VStack(alignment: .leading, spacing: 10) {
                     TextField("Link URL", text: $linkURL)
@@ -273,17 +275,14 @@ struct PadMarkdownLinkPresenter: ViewModifier {
             }
     }
 
-    private var validLink: String? {
-        let text = linkURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
-              ["https", "http", "mailto"].contains(scheme) else { return nil }
-        return text
-    }
-
     private func insertLink() {
-        guard let validLink else { return }
-        editor.format(.link, argument: validLink)
-        editor.showingLink = false
+        let input = linkURL
+        Task {
+            // Check the text as it is now, not the last result, which may lag behind typing.
+            guard let address = await editor.normalizedLink(input) else { return }
+            editor.format(.link, argument: address)
+            editor.showingLink = false
+        }
     }
 
 }

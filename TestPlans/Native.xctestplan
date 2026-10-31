@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "testTimeoutsEnabled": true,
+    "defaultTestExecutionTimeAllowance": 60,
+    "maximumTestExecutionTimeAllowance": 120
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Pad.xcodeproj",
+        "identifier": "834BFCE6C14AD072CC3B69B0",
+        "name": "PadTests"
+      }
+    }
+  ],
+  "version": 1
+}

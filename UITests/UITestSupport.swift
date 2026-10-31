@@ -64,19 +64,6 @@ enum FinderKeyboard {
     static func press(_ key: String, _ modifiers: XCUIElement.KeyModifierFlags = []) {
         finder.typeKey(key, modifierFlags: modifiers)
     }
-
-    /// Closes every Finder window whose title starts with `prefix`, such as a fixture window a test opened.
-    ///
-    /// Matching by title is reliable where matching by frame is not: a leftover window would cover the quick
-    /// pad in later tests. Windows close one at a time because each close changes the window list.
-    static func closeWindows(titledWithPrefix prefix: String) {
-        for _ in 0..<10 {
-            guard let window = finder.windows.allElementsBoundByIndex.first(where: { $0.title.hasPrefix(prefix) }) else { return }
-            let close = window.buttons["_XCUI:CloseWindow"]
-            guard close.exists else { return }
-            close.click()
-        }
-    }
 }
 
 extension XCUIApplication {

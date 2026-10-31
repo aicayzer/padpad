@@ -265,7 +265,7 @@ extension PadMarkdownEditorFeedback {
         case (.edit, "operation-pending"): PadMarkdownEditorError.pasting
         case (.edit, "read-only"): PadMessage(text: "This content can’t be edited.")
         case (.edit, "stale-document"): PadMarkdownEditorError.textChanged
-        case (.edit, "image-unsupported"): PadMessage(text: "Images aren’t supported.", hint: "To keep the text, use Paste as Plain Text.")
+        case (.edit, "image-unsupported"): PadMessage(text: "Images aren’t supported.", hint: "Paste as Plain Text keeps only the text.")
         case (.edit, "image-unavailable"): PadMessage(text: "Couldn’t add that image.")
         case (.edit, "file-unavailable"): PadMessage(text: "Couldn’t add that file.")
         default: PadMarkdownEditorError.editorFailed

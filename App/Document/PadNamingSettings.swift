@@ -8,7 +8,7 @@ struct PadNamingSettings: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Default filename")
             PadNameField(parts: $files.nameParts)
-                .frame(height: 26)
+                .frame(height: 34)
         }
     }
 }
@@ -54,7 +54,8 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         field.delegate = self
-        field.font = .systemFont(ofSize: 12)
+        field.font = .systemFont(ofSize: 14)
+        field.controlSize = .regular
         field.tokenizingCharacterSet = CharacterSet()
         field.completionDelay = .greatestFiniteMagnitude
         field.isBordered = false
@@ -83,7 +84,7 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             field.trailingAnchor.constraint(equalTo: add.leadingAnchor, constant: -8),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
             add.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
@@ -99,7 +100,7 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
         layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 0.5
-        layer?.cornerRadius = 5
+        layer?.cornerRadius = 7
     }
 
     func setParts(_ parts: [PadNamePart]) {
@@ -190,6 +191,8 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
         window.makeFirstResponder(field)
         if let editor = field.currentEditor() as? NSTextView {
             let source = NSTokenField()
+            source.font = field.font
+            source.controlSize = field.controlSize
             source.delegate = self
             source.objectValue = [Token(token)]
             let value = source.attributedStringValue

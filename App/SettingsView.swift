@@ -10,7 +10,9 @@ struct SettingsView: View {
     @State private var settingsWindow: NSWindow?
     @State private var showingResetConfirmation = false
     @State private var resetting = false
+    @State private var showingFormats = false
     @FocusState private var editingDimension: String?
+    @FocusState private var formatsFocused: Bool
 
     var body: some View {
         TabView {
@@ -201,12 +203,8 @@ struct SettingsView: View {
         return ScrollViewReader { scroll in
             Form {
                 Section {
-                    formatChecklist
-                } header: { Text("Formats") } footer: {
-                    Text("Choose the formats available to new quick-pad drafts.")
-                }
-                .id("quickPadFormat")
-                Section {
+                    enabledFormats
+                        .id("quickPadFormat")
                     Picker("Default format", selection: $document.format) {
                         ForEach(document.enabledFormats) { format in
                             Text("\(format.name) (.\(format.rawValue))").tag(format)
@@ -228,7 +226,17 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("Folder") {
-                        Text(document.folder.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).help(document.folder.path)
+                        HStack(spacing: 5) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: document.folder.path))
+                                .resizable()
+                                .frame(width: 16, height: 16)
+                                .accessibilityHidden(true)
+                            Text(document.folder.lastPathComponent)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .help(document.folder.path)
                         Button("Choose…") { Task { await document.chooseFolder(parent: settingsWindow) } }
                             .tint(.primary)
                             .accessibilityIdentifier("chooseSaveFolder")
@@ -246,33 +254,59 @@ struct SettingsView: View {
                                 .help(document.namePreview)
                                 .accessibilityLabel("Filename example: \(document.namePreview)")
                         }
-                        PadNameField(parts: $document.nameParts).frame(height: 26)
+                        PadNameField(parts: $document.nameParts).frame(height: 34)
                     }
                 } header: { Text("Storage") } footer: {
-                    Text(document.needsFolderSelection
-                         ? "Choose a folder on your first save, or choose one here. Opened files stay in their own folder."
-                         : "New quick-pad files save here. Opened files stay in their own folder.")
+                    if document.needsFolderSelection {
+                        Text("Choose a folder here or when you first save.")
+                    }
                     if let error = document.folderError { Text(error).foregroundStyle(Color("ErrorColor")) }
                 }
             }
             .formStyle(.grouped)
+            .defaultFocus($formatsFocused, true)
             .onAppear {
-                // The native filename field otherwise takes focus and scrolls the format controls out of view.
-                settingsWindow?.makeFirstResponder(nil)
+                formatsFocused = true
                 scroll.scrollTo("quickPadFormat", anchor: .top)
             }
+            .onDisappear { showingFormats = false }
         }
     }
 
-    private var formatChecklist: some View {
-        LabeledContent("Quick pad formats") {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(PadFormat.allCases) { format in
-                    Toggle(format.name, isOn: formatBinding(format))
-                        .toggleStyle(.checkbox)
-                        .disabled(document.enabledFormats == [format])
-                        .accessibilityIdentifier("enableFormat-\(format.rawValue)")
+    private var enabledFormats: some View {
+        LabeledContent("Enabled formats") {
+            Button { showingFormats.toggle() } label: {
+                HStack(spacing: 10) {
+                    Text(document.enabledFormats.count == 1 ? "1 format" : "\(document.enabledFormats.count) formats")
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                        .background(.quaternary, in: Circle())
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
+            .focusable()
+            .focused($formatsFocused)
+            .accessibilityLabel("Enabled formats")
+            .accessibilityValue("\(document.enabledFormats.count) selected")
+            .accessibilityIdentifier("enabledFormats")
+            .popover(isPresented: $showingFormats, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Enabled formats")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(PadFormat.allCases) { format in
+                        Toggle(format.name, isOn: formatBinding(format))
+                            .toggleStyle(.checkbox)
+                            .disabled(document.enabledFormats == [format])
+                            .accessibilityIdentifier("enableFormat-\(format.rawValue)")
+                    }
+                }
+                .padding(16)
+                .frame(minWidth: 200, alignment: .leading)
+                .tint(settings.accentColor)
             }
         }
     }

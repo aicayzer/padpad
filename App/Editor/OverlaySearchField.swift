@@ -23,6 +23,7 @@ struct OverlaySearchField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.lineBreakMode = .byClipping
+        field.usesSingleLineMode = true
         field.cell?.isScrollable = true
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.delegate = context.coordinator
@@ -34,11 +35,12 @@ struct OverlaySearchField: NSViewRepresentable {
         context.coordinator.parent = self
         field.placeholderString = placeholder
         field.setAccessibilityLabel(placeholder)
-        field.font = .systemFont(ofSize: fontSize, weight: fontWeight)
+        let font = NSFont.systemFont(ofSize: fontSize, weight: fontWeight)
+        if field.font != font { field.font = font }
         field.selectsTextOnFocus = selectsTextOnFocus
         field.isCurrent = isCurrent
         field.blur = blur
-        if field.stringValue != text { field.stringValue = text }
+        field.synchronizeText(text)
         field.initiallyFocused = initiallyFocused
         field.requestInitialFocus()
     }
@@ -60,7 +62,7 @@ struct OverlaySearchField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField, parent.isCurrent() else { return }
-            parent.text = field.stringValue
+            parent.text = field.currentEditor()?.string ?? field.stringValue
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -103,6 +105,20 @@ final class OverlayTextField: NSTextField {
     private(set) var hasFocused = false
     private var generation = 0
     private var scheduled = false
+
+    func synchronizeText(_ text: String) {
+        guard let editor = currentEditor() as? NSTextView else {
+            if stringValue != text { stringValue = text }
+            return
+        }
+        // The field editor owns in-progress input. Reassigning stringValue can reset its caret.
+        guard editor.string != text, !editor.hasMarkedText() else { return }
+        let selection = editor.selectedRange()
+        stringValue = text
+        let length = (text as NSString).length
+        let start = min(selection.location, length)
+        editor.setSelectedRange(NSRange(location: start, length: min(selection.length, length - start)))
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

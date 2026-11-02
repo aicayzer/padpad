@@ -11,9 +11,11 @@ final class ToolbarRefinementUITests: PadUITestCase {
         let settings = app.windows["com_apple_SwiftUI_Settings_window"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.toolbars.buttons["Files"].click()
-        XCTAssertTrue(settings.staticTexts["Formats"].exists)
-        XCTAssertTrue(settings.staticTexts["Quick pad formats"].exists)
+        XCTAssertFalse(settings.staticTexts["Formats"].exists)
+        XCTAssertTrue(settings.popUpButtons["enabledFormats"].exists)
         XCTAssertFalse(settings.switches["showFormatToggle"].exists)
+        XCTAssertLessThan(settings.popUpButtons["enabledFormats"].frame.minY,
+                          settings.popUpButtons["defaultFormat"].frame.minY)
         XCTAssertLessThan(settings.popUpButtons["defaultFormat"].frame.minY,
                           settings.switches["saveAutomatically"].frame.minY)
         attach(settings.screenshot(), name: "Formats and draft defaults")
@@ -43,6 +45,7 @@ final class ToolbarRefinementUITests: PadUITestCase {
         title.doubleClick()
         let name = app.textFields["Name"].firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertGreaterThan(name.frame.width, frame.width * 0.6)
         XCTAssertEqual(name.value as? String, "Untitled")
         XCTAssertFalse(app.staticTexts[".md"].exists, "Rename edits only the name")
         app.typeText("Small")
@@ -128,38 +131,41 @@ final class ToolbarRefinementUITests: PadUITestCase {
         XCTAssertTrue(settings.buttons["chooseSaveFolder"].isHittable, settings.debugDescription)
         XCTAssertTrue(settings.staticTexts["Filename pattern"].isHittable, settings.debugDescription)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
-        let markdown = settings.checkBoxes["enableFormat-md"].firstMatch
-        let plainText = settings.checkBoxes["enableFormat-txt"].firstMatch
-        let rtf = settings.checkBoxes["enableFormat-rtf"].firstMatch
+        settings.popUpButtons["enabledFormats"].click()
+        let markdown = app.menuItems["enableFormat-md"].firstMatch
+        let plainText = app.menuItems["enableFormat-txt"].firstMatch
+        let rtf = app.menuItems["enableFormat-rtf"].firstMatch
         XCTAssertTrue(markdown.waitForExistence(timeout: 5), app.debugDescription)
-        for checkbox in [markdown, plainText, rtf] where (checkbox.value as? NSNumber)?.boolValue == false {
-            checkbox.click()
-        }
         attach(settings.screenshot(), name: "Files settings at default height on selection")
-        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes before disabling formats")
-        XCTAssertEqual((markdown.value as? NSNumber)?.boolValue, true)
-        XCTAssertEqual((plainText.value as? NSNumber)?.boolValue, true)
-        XCTAssertEqual((rtf.value as? NSNumber)?.boolValue, true)
+        attachFormatState([markdown, plainText, rtf], name: "Format choices before disabling formats")
+        XCTAssertEqual(settings.popUpButtons["enabledFormats"].value as? String, "3 formats")
         markdown.click()
-        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling Markdown")
+        settings.popUpButtons["enabledFormats"].click()
+        attachFormatState([markdown, plainText, rtf], name: "Format choices after disabling Markdown")
         attach(settings.screenshot(), name: "Default Files settings after disabling Markdown")
         rtf.click()
-        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling RTF")
+        settings.popUpButtons["enabledFormats"].click()
+        attachFormatState([markdown, plainText, rtf], name: "Format choices after disabling RTF")
         attach(settings.screenshot(), name: "Default Files settings with only Plain Text enabled")
         XCTAssertFalse(plainText.isEnabled, "The last enabled format stays selected")
         XCTAssertFalse(app.buttons["documentFormat"].exists)
         XCTAssertTrue(app.staticTexts["documentFormatLabel"].exists)
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
+        app.typeKey(.escape, modifierFlags: [])
         settings.toolbars.buttons["Editor"].click()
         let visibility = settings.switches["showFormatToggle"].firstMatch
         visibility.click()
         XCTAssertFalse(app.staticTexts["documentFormatLabel"].exists)
         visibility.click()
         settings.toolbars.buttons["Files"].click()
+        settings.popUpButtons["enabledFormats"].click()
         markdown.click()
+        settings.popUpButtons["enabledFormats"].click()
         plainText.click()
+        settings.popUpButtons["enabledFormats"].click()
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
         XCTAssertFalse(markdown.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(settings.popUpButtons["defaultFormat"].value as? String == "Markdown (.md)")
         attach(settings.screenshot(), name: "Files settings with one enabled format and retained TXT draft")
         let footer = app.buttons["documentFormat"].firstMatch
@@ -173,7 +179,9 @@ final class ToolbarRefinementUITests: PadUITestCase {
         XCTAssertFalse(app.menuButtons["documentFormat"].exists, "The footer no longer exposes a format menu")
         app.typeKey(",", modifierFlags: .command)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
+        settings.popUpButtons["enabledFormats"].click()
         plainText.click()
+        settings.popUpButtons["enabledFormats"].click()
         rtf.click()
     }
 
@@ -246,8 +254,8 @@ final class ToolbarRefinementUITests: PadUITestCase {
         return app
     }
 
-    private func attachCheckboxState(_ checkboxes: [XCUIElement], name: String) {
-        let text = checkboxes.map { "\($0.identifier): value=\(String(describing: $0.value)) enabled=\($0.isEnabled) hittable=\($0.isHittable) frame=\($0.frame)" }.joined(separator: "\n")
+    private func attachFormatState(_ items: [XCUIElement], name: String) {
+        let text = items.map { "\($0.identifier): value=\(String(describing: $0.value)) enabled=\($0.isEnabled) hittable=\($0.isHittable) frame=\($0.frame)" }.joined(separator: "\n")
         let attachment = XCTAttachment(string: text)
         attachment.name = name
         attachment.lifetime = .deleteOnSuccess

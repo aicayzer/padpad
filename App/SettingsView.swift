@@ -201,12 +201,8 @@ struct SettingsView: View {
         return ScrollViewReader { scroll in
             Form {
                 Section {
-                    formatChecklist
-                } header: { Text("Formats") } footer: {
-                    Text("Choose the formats available to new quick-pad drafts.")
-                }
-                .id("quickPadFormat")
-                Section {
+                    enabledFormats
+                        .id("quickPadFormat")
                     Picker("Default format", selection: $document.format) {
                         ForEach(document.enabledFormats) { format in
                             Text("\(format.name) (.\(format.rawValue))").tag(format)
@@ -228,7 +224,17 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("Folder") {
-                        Text(document.folder.lastPathComponent).foregroundStyle(.secondary).lineLimit(1).help(document.folder.path)
+                        HStack(spacing: 5) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: document.folder.path))
+                                .resizable()
+                                .frame(width: 16, height: 16)
+                                .accessibilityHidden(true)
+                            Text(document.folder.lastPathComponent)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .help(document.folder.path)
                         Button("Choose…") { Task { await document.chooseFolder(parent: settingsWindow) } }
                             .tint(.primary)
                             .accessibilityIdentifier("chooseSaveFolder")
@@ -246,40 +252,29 @@ struct SettingsView: View {
                                 .help(document.namePreview)
                                 .accessibilityLabel("Filename example: \(document.namePreview)")
                         }
-                        PadNameField(parts: $document.nameParts).frame(height: 26)
+                        PadNameField(parts: $document.nameParts).frame(height: 34)
                     }
                 } header: { Text("Storage") } footer: {
-                    Text(document.needsFolderSelection
-                         ? "Choose a folder on your first save, or choose one here. Opened files stay in their own folder."
-                         : "New quick-pad files save here. Opened files stay in their own folder.")
+                    if document.needsFolderSelection {
+                        Text("Choose a folder here or when you first save.")
+                    }
                     if let error = document.folderError { Text(error).foregroundStyle(Color("ErrorColor")) }
                 }
             }
             .formStyle(.grouped)
             .onAppear {
-                // The native filename field otherwise takes focus and scrolls the format controls out of view.
-                settingsWindow?.makeFirstResponder(nil)
                 scroll.scrollTo("quickPadFormat", anchor: .top)
             }
         }
     }
 
-    private var formatChecklist: some View {
-        LabeledContent("Quick pad formats") {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(PadFormat.allCases) { format in
-                    Toggle(format.name, isOn: formatBinding(format))
-                        .toggleStyle(.checkbox)
-                        .disabled(document.enabledFormats == [format])
-                        .accessibilityIdentifier("enableFormat-\(format.rawValue)")
-                }
+    private var enabledFormats: some View {
+        LabeledContent("Enabled formats") {
+            EnabledFormatsPicker(enabledFormats: document.enabledFormats) { format, enabled in
+                document.setFormatEnabled(format, enabled: enabled)
             }
+            .fixedSize()
         }
-    }
-
-    private func formatBinding(_ format: PadFormat) -> Binding<Bool> {
-        Binding(get: { document.enabledFormats.contains(format) },
-                set: { document.setFormatEnabled(format, enabled: $0) })
     }
 
     private var draftExplanation: String {

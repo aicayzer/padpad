@@ -424,7 +424,6 @@ struct PadView: View {
     let prepareTitleFocus: () -> Void
     @State private var renaming = false
     @State private var titleDraft = ""
-    @State private var renameWidth: CGFloat = 100
     @State private var renamedDocument: UUID?
     @FocusState private var editing: Bool
     @State private var shareAnchor = PadShareAnchor()
@@ -497,7 +496,7 @@ struct PadView: View {
                                                        submit: { commitRename() },
                                                        dismiss: { finishRename() },
                                                        blur: { commitRename(refocus: false) })
-                                        .frame(width: min(renameWidth, max(40, titleSpace - 36)))
+                                        .frame(width: titleSpace)
                                 }
                                 .frame(height: 22)
                             } else {
@@ -684,15 +683,10 @@ struct PadView: View {
         }
     }
 
-    private func titleWidth(_ text: String, weight: NSFont.Weight) -> CGFloat {
-        (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 14, weight: weight)]).width
-    }
-
     private func beginRename() {
         guard files.isActive, !files.isBusy, !files.onboarding.isPresented, !renaming else { return }
         editing = false
         titleDraft = files.editableName
-        renameWidth = max(100, titleWidth(titleDraft, weight: .semibold) + 12)
         renamedDocument = files.documentID
         prepareTitleFocus()
         renaming = true

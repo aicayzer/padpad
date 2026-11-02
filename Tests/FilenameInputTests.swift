@@ -17,6 +17,9 @@ struct FilenameInputTests {
         input.setParts(parts)
         defer { input.field.objectValue = []; input.field.delegate = nil }
         window.makeKeyAndOrderFront(nil)
+        await nextMainQueueTurn()
+        #expect(window.firstResponder === input)
+        #expect(input.field.currentEditor() == nil)
         #expect(window.makeFirstResponder(input.field))
         let editor = try #require(input.field.currentEditor() as? NSTextView)
         editor.setSelectedRange(NSRange(location: 9, length: 0))

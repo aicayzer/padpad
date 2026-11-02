@@ -8,7 +8,7 @@ struct PadNamingSettings: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Default filename")
             PadNameField(parts: $files.nameParts)
-                .frame(height: 26)
+                .frame(height: 34)
         }
     }
 }
@@ -54,7 +54,8 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         field.delegate = self
-        field.font = .systemFont(ofSize: 12)
+        field.font = .systemFont(ofSize: 14)
+        field.controlSize = .regular
         field.tokenizingCharacterSet = CharacterSet()
         field.completionDelay = .greatestFiniteMagnitude
         field.isBordered = false
@@ -83,7 +84,7 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             field.trailingAnchor.constraint(equalTo: add.leadingAnchor, constant: -8),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
             add.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
@@ -95,11 +96,14 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { false }
+
     override func updateLayer() {
         layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 0.5
-        layer?.cornerRadius = 5
+        layer?.cornerRadius = 7
     }
 
     func setParts(_ parts: [PadNamePart]) {
@@ -156,7 +160,13 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         NotificationCenter.default.removeObserver(self)
-        guard window != nil else { return }
+        guard let window else { return }
+        // Start outside the text editor. Opening Files must not select its editable pattern.
+        window.initialFirstResponder = self
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window else { return }
+            window.makeFirstResponder(self)
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(textStorageChanged),
                                                name: NSTextStorage.didProcessEditingNotification, object: nil)
     }
@@ -190,6 +200,8 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
         window.makeFirstResponder(field)
         if let editor = field.currentEditor() as? NSTextView {
             let source = NSTokenField()
+            source.font = field.font
+            source.controlSize = field.controlSize
             source.delegate = self
             source.objectValue = [Token(token)]
             let value = source.attributedStringValue

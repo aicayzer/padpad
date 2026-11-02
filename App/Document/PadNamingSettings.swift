@@ -96,6 +96,9 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { false }
+
     override func updateLayer() {
         layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
         layer?.borderColor = NSColor.separatorColor.cgColor
@@ -157,7 +160,13 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         NotificationCenter.default.removeObserver(self)
-        guard window != nil else { return }
+        guard let window else { return }
+        // Start outside the text editor. Opening Files must not select its editable pattern.
+        window.initialFirstResponder = self
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window else { return }
+            window.makeFirstResponder(self)
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(textStorageChanged),
                                                name: NSTextStorage.didProcessEditingNotification, object: nil)
     }

@@ -12,9 +12,9 @@ final class ToolbarRefinementUITests: PadUITestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.toolbars.buttons["Files"].click()
         XCTAssertFalse(settings.staticTexts["Formats"].exists)
-        XCTAssertTrue(settings.buttons["enabledFormats"].exists)
+        XCTAssertTrue(settings.popUpButtons["enabledFormats"].exists)
         XCTAssertFalse(settings.switches["showFormatToggle"].exists)
-        XCTAssertLessThan(settings.buttons["enabledFormats"].frame.minY,
+        XCTAssertLessThan(settings.popUpButtons["enabledFormats"].frame.minY,
                           settings.popUpButtons["defaultFormat"].frame.minY)
         XCTAssertLessThan(settings.popUpButtons["defaultFormat"].frame.minY,
                           settings.switches["saveAutomatically"].frame.minY)
@@ -131,24 +131,21 @@ final class ToolbarRefinementUITests: PadUITestCase {
         XCTAssertTrue(settings.buttons["chooseSaveFolder"].isHittable, settings.debugDescription)
         XCTAssertTrue(settings.staticTexts["Filename pattern"].isHittable, settings.debugDescription)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
-        settings.buttons["enabledFormats"].click()
-        let markdown = app.checkBoxes["enableFormat-md"].firstMatch
-        let plainText = app.checkBoxes["enableFormat-txt"].firstMatch
-        let rtf = app.checkBoxes["enableFormat-rtf"].firstMatch
+        settings.popUpButtons["enabledFormats"].click()
+        let markdown = app.menuItems["enableFormat-md"].firstMatch
+        let plainText = app.menuItems["enableFormat-txt"].firstMatch
+        let rtf = app.menuItems["enableFormat-rtf"].firstMatch
         XCTAssertTrue(markdown.waitForExistence(timeout: 5), app.debugDescription)
-        for checkbox in [markdown, plainText, rtf] where (checkbox.value as? NSNumber)?.boolValue == false {
-            checkbox.click()
-        }
         attach(settings.screenshot(), name: "Files settings at default height on selection")
-        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes before disabling formats")
-        XCTAssertEqual((markdown.value as? NSNumber)?.boolValue, true)
-        XCTAssertEqual((plainText.value as? NSNumber)?.boolValue, true)
-        XCTAssertEqual((rtf.value as? NSNumber)?.boolValue, true)
+        attachFormatState([markdown, plainText, rtf], name: "Format choices before disabling formats")
+        XCTAssertEqual(settings.popUpButtons["enabledFormats"].value as? String, "3 formats")
         markdown.click()
-        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling Markdown")
+        settings.popUpButtons["enabledFormats"].click()
+        attachFormatState([markdown, plainText, rtf], name: "Format choices after disabling Markdown")
         attach(settings.screenshot(), name: "Default Files settings after disabling Markdown")
         rtf.click()
-        attachCheckboxState([markdown, plainText, rtf], name: "Checkboxes after disabling RTF")
+        settings.popUpButtons["enabledFormats"].click()
+        attachFormatState([markdown, plainText, rtf], name: "Format choices after disabling RTF")
         attach(settings.screenshot(), name: "Default Files settings with only Plain Text enabled")
         XCTAssertFalse(plainText.isEnabled, "The last enabled format stays selected")
         XCTAssertFalse(app.buttons["documentFormat"].exists)
@@ -161,9 +158,11 @@ final class ToolbarRefinementUITests: PadUITestCase {
         XCTAssertFalse(app.staticTexts["documentFormatLabel"].exists)
         visibility.click()
         settings.toolbars.buttons["Files"].click()
-        settings.buttons["enabledFormats"].click()
+        settings.popUpButtons["enabledFormats"].click()
         markdown.click()
+        settings.popUpButtons["enabledFormats"].click()
         plainText.click()
+        settings.popUpButtons["enabledFormats"].click()
         XCTAssertEqual(editor.value as? String, "Keep this draft é")
         XCTAssertFalse(markdown.isEnabled)
         app.typeKey(.escape, modifierFlags: [])
@@ -180,8 +179,9 @@ final class ToolbarRefinementUITests: PadUITestCase {
         XCTAssertFalse(app.menuButtons["documentFormat"].exists, "The footer no longer exposes a format menu")
         app.typeKey(",", modifierFlags: .command)
         settings.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 600)
-        settings.buttons["enabledFormats"].click()
+        settings.popUpButtons["enabledFormats"].click()
         plainText.click()
+        settings.popUpButtons["enabledFormats"].click()
         rtf.click()
     }
 
@@ -254,8 +254,8 @@ final class ToolbarRefinementUITests: PadUITestCase {
         return app
     }
 
-    private func attachCheckboxState(_ checkboxes: [XCUIElement], name: String) {
-        let text = checkboxes.map { "\($0.identifier): value=\(String(describing: $0.value)) enabled=\($0.isEnabled) hittable=\($0.isHittable) frame=\($0.frame)" }.joined(separator: "\n")
+    private func attachFormatState(_ items: [XCUIElement], name: String) {
+        let text = items.map { "\($0.identifier): value=\(String(describing: $0.value)) enabled=\($0.isEnabled) hittable=\($0.isHittable) frame=\($0.frame)" }.joined(separator: "\n")
         let attachment = XCTAttachment(string: text)
         attachment.name = name
         attachment.lifetime = .deleteOnSuccess

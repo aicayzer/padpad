@@ -10,9 +10,7 @@ struct SettingsView: View {
     @State private var settingsWindow: NSWindow?
     @State private var showingResetConfirmation = false
     @State private var resetting = false
-    @State private var showingFormats = false
     @FocusState private var editingDimension: String?
-    @FocusState private var formatsFocused: Bool
 
     var body: some View {
         TabView {
@@ -264,56 +262,19 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
-            .defaultFocus($formatsFocused, true)
             .onAppear {
-                formatsFocused = true
                 scroll.scrollTo("quickPadFormat", anchor: .top)
             }
-            .onDisappear { showingFormats = false }
         }
     }
 
     private var enabledFormats: some View {
         LabeledContent("Enabled formats") {
-            Button { showingFormats.toggle() } label: {
-                HStack(spacing: 10) {
-                    Text(document.enabledFormats.count == 1 ? "1 format" : "\(document.enabledFormats.count) formats")
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                        .background(.quaternary, in: Circle())
-                }
-                .contentShape(Rectangle())
+            EnabledFormatsPicker(enabledFormats: document.enabledFormats) { format, enabled in
+                document.setFormatEnabled(format, enabled: enabled)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.primary)
-            .focusable()
-            .focused($formatsFocused)
-            .accessibilityLabel("Enabled formats")
-            .accessibilityValue("\(document.enabledFormats.count) selected")
-            .accessibilityIdentifier("enabledFormats")
-            .popover(isPresented: $showingFormats, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Enabled formats")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(PadFormat.allCases) { format in
-                        Toggle(format.name, isOn: formatBinding(format))
-                            .toggleStyle(.checkbox)
-                            .disabled(document.enabledFormats == [format])
-                            .accessibilityIdentifier("enableFormat-\(format.rawValue)")
-                    }
-                }
-                .padding(16)
-                .frame(minWidth: 200, alignment: .leading)
-                .tint(settings.accentColor)
-            }
+            .fixedSize()
         }
-    }
-
-    private func formatBinding(_ format: PadFormat) -> Binding<Bool> {
-        Binding(get: { document.enabledFormats.contains(format) },
-                set: { document.setFormatEnabled(format, enabled: $0) })
     }
 
     private var draftExplanation: String {

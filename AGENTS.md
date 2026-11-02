@@ -39,7 +39,7 @@ Scratch text is intentionally temporary, because the quick pad is a scratch surf
 - **RTF** opens through `InkKitRTF` and edits in InkKit's formatted mode. `PadDocument.text` holds RTF as canonical `RichTextDocument` JSON (`PadRichText`). If the converter refuses a file (pictures, RTFD, merged cells and other content it cannot keep), leave it closed with an alert; never open it in a way a later save could overwrite. An unedited RTF file is never rewritten, and an unedited Save As copies its bytes. RTFD packages are an unsupported type.
 - The footer format button cycles unsaved quick-pad drafts through the enabled formats in MD, TXT, RTF order. MD and TXT keep the exact source. A switch to or from RTF converts, and any conversion that loses something, including every RTF to TXT switch, needs confirmation first.
 - File-backed windows respect their extension and omit the footer switch. Explicit Save As can convert a copy and keep the original.
-- Settings: Files groups the enabled quick-pad formats under Formats and puts the default format at the top of Drafts. Editor controls format-button visibility under Text.
+- Settings: Files puts Enabled formats and Default format at the top of Drafts. Enabled formats uses a native pop-up button with independently checked menu items. Editor controls format-button visibility under Text.
 
 ### Clipboard
 

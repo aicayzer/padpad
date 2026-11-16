@@ -65,6 +65,10 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     var onError: (any Error) -> Void = { _ in }
     var onFeedback: (PadMarkdownEditorFeedback, UUID) -> Void = { _, _ in }
     var onReady: () -> Void = {}
+    /// The page restarted after its process ended; the owner loads its latest text again.
+    var onRestarted: () -> Void = {}
+    /// The editor's process ended and could not be restarted, so the owner's last received text is the latest copy.
+    private(set) var hasEnded = false
     var accentOverride: NSColor? { didSet { applyAccent() } }
     var allowsFocus = true
     var showingLink = false
@@ -89,6 +93,8 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
     @ObservationIgnored private var focusTask: Task<Void, any Error>?
     @ObservationIgnored private var focusRevision = 0
     @ObservationIgnored private var hasFocusedDocument = false
+    @ObservationIgnored private var restarts: [ContinuousClock.Instant] = []
+    private static let restartLimit = 3
 
     var ownsFirstResponder: Bool {
         guard let responder = webView.window?.firstResponder else { return false }
@@ -764,9 +770,25 @@ extension PadMarkdownEditorController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { report(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { report(error) }
+    // macOS can end an idle page's process, for example under memory pressure. Restart the page so saving and
+    // closing still work; the owner reloads the text the editor last reported.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         pageReady = false
-        report(PadMarkdownEditorError.unavailable)
+        isReady = false
+        loadedFormat = nil
+        loadTask?.cancel()
+        loadTask = nil
+        diagnostics?.record(.ended, scope: diagnosticScope, format: documentFormat, generation: generation)
+        let now = ContinuousClock.now
+        restarts = restarts.filter { now - $0 < .seconds(60) } + [now]
+        guard restarts.count <= Self.restartLimit, let editorURL else {
+            hasEnded = true
+            report(PadMarkdownEditorError.unavailable)
+            return
+        }
+        failure = nil
+        webView.loadFileURL(editorURL, allowingReadAccessTo: editorURL.deletingLastPathComponent())
+        onRestarted()
     }
 }
 

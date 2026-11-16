@@ -902,6 +902,57 @@ struct MarkdownBridgeTests {
         }
     }
 
+    @Test func endedEditorProcessRestartsWithTheLatestTextAndNeverBlocksClosing() async throws {
+        let suite = "pad-editor-ended-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let document = PadDocument(defaults: defaults, presentsWindow: false)
+        document.text = "Before"
+        document.mountMarkdownEditor()
+        let editor = try #require(document.markdownEditor)
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 500, height: 400),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = editor.webView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            window.close()
+            defaults.removePersistentDomain(forName: suite)
+        }
+        try await ready(editor)
+        _ = try await editor.snapshot()
+        let inserted = try await editor.webView.evaluateJavaScript("JSON.stringify(window.editor.insertText(' edited', 1) ?? null)") as? String
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !document.text.hasPrefix("Before edited"), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(document.text.hasPrefix("Before edited"), "insertText returned \(inserted ?? "nil"); text is \(document.text)")
+        let edited = document.text
+
+        // End the page's process the way macOS does to an idle page, so WebKit reports it to the delegate.
+        let process = try #require(editor.webView.value(forKey: "_webProcessIdentifier") as? Int32)
+        try #require(process > 0 && Darwin.kill(process, SIGKILL) == 0)
+        let restarted = ContinuousClock.now + .seconds(15)
+        while ContinuousClock.now < restarted {
+            if let current = editor.webView.value(forKey: "_webProcessIdentifier") as? Int32, current != process, current > 0,
+               editor.isReady { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(editor.isReady, "The editor did not restart after its process ended")
+        let shown = try await editor.webView.evaluateJavaScript("document.querySelector('.ProseMirror')?.textContent") as? String
+        #expect(shown?.hasPrefix("Before edited") == true)
+        #expect(!editor.hasEnded)
+        #expect(try await editor.snapshot() == nil)
+        #expect(await document.captureForReset())
+        #expect(document.text == edited)
+        #expect(document.error == nil)
+
+        // Repeated ends stop the restarts; the last reported text still lets the document close or save.
+        for _ in 0..<3 { editor.webViewWebContentProcessDidTerminate(editor.webView) }
+        #expect(editor.hasEnded)
+        #expect(await document.captureForReset())
+        #expect(document.text == edited)
+    }
+
     @Test func saveAsFormatRoundTripReloadsNativeEditsIntoTheMountedEditor() async throws {
         let suite = "pad-format-roundtrip-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

@@ -84,6 +84,14 @@ final class PadDocument {
     var reusePeriod: PadReuse {
         didSet { defaults.set(reusePeriod.rawValue, forKey: Self.reuseKey) }
     }
+    /// Copies a new file's path after its first save. Copy Path always copies.
+    var copiesPathAfterSaving: Bool {
+        didSet { defaults.set(copiesPathAfterSaving, forKey: Self.copyPathAfterSavingKey) }
+    }
+    /// Starts the filename number at 1 on each new day; otherwise it never resets.
+    var resetsNumberDaily: Bool {
+        didSet { defaults.set(resetsNumberDaily, forKey: Self.resetNumberDailyKey) }
+    }
     var nameParts: [PadNamePart] {
         didSet {
             if let data = try? JSONEncoder().encode(nameParts) { defaults.set(data, forKey: Self.namePartsKey) }
@@ -118,17 +126,38 @@ final class PadDocument {
     }
     private(set) var notice: String? {
         didSet {
-            noticeTask?.cancel()
-            noticeGeneration += 1
-            guard notice != nil else { return }
-            let generation = noticeGeneration
-            let duration = noticeDuration
-            noticeTask = Task { [weak self] in
-                do { try await Task.sleep(for: duration) } catch { return }
-                guard let self, generation == self.noticeGeneration else { return }
-                self.notice = nil
-            }
+            noticeRevealsFile = false
+            noticeHeld = false
+            scheduleNoticeExpiry()
         }
+    }
+    /// The notice is about the saved file, so clicking it shows the file in Finder.
+    private(set) var noticeRevealsFile = false
+    private var noticeHeld = false
+
+    private func scheduleNoticeExpiry() {
+        noticeTask?.cancel()
+        noticeGeneration += 1
+        guard notice != nil, !noticeHeld else { return }
+        let generation = noticeGeneration
+        let duration = noticeDuration
+        noticeTask = Task { [weak self] in
+            do { try await Task.sleep(for: duration) } catch { return }
+            guard let self, generation == self.noticeGeneration else { return }
+            self.notice = nil
+        }
+    }
+
+    /// Keeps the notice while the pointer is over it, so there is time to click it.
+    func holdNotice(_ held: Bool) {
+        guard notice != nil, held != noticeHeld else { return }
+        noticeHeld = held
+        scheduleNoticeExpiry()
+    }
+
+    private func announceFile(_ text: String) {
+        notice = text
+        noticeRevealsFile = url != nil
     }
     private var noticeTask: Task<Void, Never>?
     private var noticeGeneration = 0
@@ -151,6 +180,8 @@ final class PadDocument {
     @ObservationIgnored var editorConversion: (@MainActor (PadFormat) async throws -> PadConversion)?
     private var pendingName: String?
     private var nextNumber: Int
+    /// The clock for generated names. Tests set it.
+    var currentDate: @MainActor () -> Date = { .now }
     private enum Operation { case transition, filePanel, sharing }
     private var operation: Operation?
     private var sharePicker: NSSharingServicePicker?
@@ -180,6 +211,9 @@ final class PadDocument {
     private static let reuseKey = "pad.reusePeriod"
     private static let namePartsKey = "pad.nameParts"
     private static let nextNumberKey = "pad.nextNumber"
+    private static let numberDayKey = "pad.numberDay"
+    private static let resetNumberDailyKey = "pad.resetNumberDaily"
+    private static let copyPathAfterSavingKey = "pad.copyPathAfterSaving"
 
     static var downloadsFolder: URL {
         // FileManager points inside the sandbox. This path only suggests a location in the chooser.
@@ -240,6 +274,8 @@ final class PadDocument {
         reusePeriod = PadReuse(rawValue: defaults.object(forKey: Self.reuseKey) as? Int ?? 15) ?? .fifteenMinutes
         nameParts = defaults.data(forKey: Self.namePartsKey)
             .flatMap { try? JSONDecoder().decode([PadNamePart].self, from: $0) } ?? PadFilename.defaultParts
+        copiesPathAfterSaving = defaults.bool(forKey: Self.copyPathAfterSavingKey)
+        resetsNumberDaily = defaults.object(forKey: Self.resetNumberDailyKey) as? Bool ?? true
         nextNumber = max(1, defaults.integer(forKey: Self.nextNumberKey))
         folder = defaultFolder ?? Self.downloadsFolder
         var stale = false
@@ -271,7 +307,10 @@ final class PadDocument {
         url?.lastPathComponent ?? pendingName.map { "\($0).\(currentFormat.rawValue)" } ?? "Untitled"
     }
     var namePreview: String {
-        (try? PadFilename.name(parts: nameParts, format: format, number: nextNumber)) ?? "Invalid filename"
+        // Read the observed values so the preview follows the counter and its setting.
+        _ = (nextNumber, resetsNumberDaily)
+        let now = currentDate()
+        return (try? PadFilename.name(parts: nameParts, format: format, now: now, number: startingNumber(on: now))) ?? "Invalid filename"
     }
 
     func printDocument() async {
@@ -835,7 +874,23 @@ final class PadDocument {
         saveCurrent()
     }
 
-    private func saveCurrent() {
+    /// A file window has a path to copy. A draft with text saves first, as Save does.
+    var canCopyPath: Bool { url != nil || isDirty }
+
+    func copyFilePath() {
+        if let url {
+            guard !isBusy else { return }
+            copyPath(url.path)
+            announceFile("Path copied")
+            return
+        }
+        guard isDirty else { return }
+        if synchronizeEditorThen({ self.copyFilePath() }) { return }
+        guard !isBusy, isDirty else { return }
+        saveCurrent(copyingPath: true)
+    }
+
+    private func saveCurrent(copyingPath: Bool = false) {
         recordDiagnostic(.save)
         let namesFile = url == nil && pendingName == nil
         var observedBytes: Data?
@@ -846,7 +901,7 @@ final class PadDocument {
                 guard bytesOnDisk == baseline else { throw PadError.changed }
                 // Writing RTF restyles the whole file, so an unedited RTF file is never rewritten.
                 if currentFormat == .rtf, !isDirty {
-                    notice = "Saved"
+                    announceFile("Saved")
                     error = nil
                     reportedReadFailure = nil
                     recordDiagnostic(.saveSucceeded)
@@ -857,7 +912,7 @@ final class PadDocument {
                 try bytes.write(to: url, options: .atomic)
                 baseline = bytes
                 savedText = text
-                notice = "Saved"
+                announceFile("Saved")
             } else {
                 guard try obtainSaveFolderAccess() else { return }
                 let bytes = try currentFormat.encode(text)
@@ -874,8 +929,12 @@ final class PadDocument {
                 baseline = bytes
                 savedText = text
                 documentScope = folder.startAccessingSecurityScopedResource() ? folder : nil
-                copyPath(destination.path)
-                notice = "Saved. Path copied."
+                if copyingPath || defaults.bool(forKey: Self.copyPathAfterSavingKey) {
+                    copyPath(destination.path)
+                    announceFile("Saved. Path copied.")
+                } else {
+                    announceFile("Saved")
+                }
             }
             error = nil
             reportedReadFailure = nil
@@ -997,8 +1056,9 @@ final class PadDocument {
             } else if let pendingName {
                 suggestion = (try PadFilename.filename(stem: pendingName, extension: saveFormat.rawValue), nil)
             } else {
-                let generated = try PadFilename.available(in: directory, parts: nameParts,
-                                                             format: saveFormat, number: nextNumber)
+                let now = currentDate()
+                let generated = try PadFilename.available(in: directory, parts: nameParts, format: saveFormat,
+                                                             now: now, number: startingNumber(on: now))
                 guard generated.number < Int.max else { throw PadError.invalidName }
                 suggestion = (generated.url.lastPathComponent, generated.number)
             }
@@ -1056,11 +1116,11 @@ final class PadDocument {
                 panel?.resumeEditor()
             }
             if let number = suggestion.number, destination.lastPathComponent == suggestion.name {
-                advanceGeneratedNumber(after: number)
+                advanceGeneratedNumber(after: number, on: currentDate())
             }
             error = nil
             reportedReadFailure = nil
-            notice = "Saved"
+            announceFile("Saved")
             updateTitle()
         } catch {
             if accessing { destination.stopAccessingSecurityScopedResource() }
@@ -1251,6 +1311,8 @@ final class PadDocument {
         saveAutomatically = false
         reusePeriod = .fifteenMinutes
         nameParts = PadFilename.defaultParts
+        copiesPathAfterSaving = false
+        resetsNumberDaily = true
         // Keep an independent scope alive for an open file before forgetting its save-folder grant.
         if documentScope == nil, url != nil, let folderScope {
             documentScope = folderScope
@@ -1318,7 +1380,7 @@ final class PadDocument {
                 pendingName = stem
             }
             error = nil
-            notice = "Renamed"
+            announceFile("Renamed")
             updateTitle()
             return true
         } catch {
@@ -1391,24 +1453,39 @@ final class PadDocument {
     }
 
     private func saveGeneratedFile(_ bytes: Data) throws -> URL {
-        let now = Date.now
+        let now = currentDate()
         while true {
             let candidate = try PadFilename.available(in: folder, parts: nameParts, format: currentFormat,
-                                                         now: now, number: nextNumber)
+                                                         now: now, number: startingNumber(on: now))
             guard candidate.number < Int.max else { throw PadError.invalidName }
             do {
                 try bytes.write(to: candidate.url, options: .withoutOverwriting)
             } catch let error as CocoaError where error.code == .fileWriteFileExists {
                 continue
             }
-            advanceGeneratedNumber(after: candidate.number)
+            advanceGeneratedNumber(after: candidate.number, on: now)
             return candidate.url
         }
     }
 
-    private func advanceGeneratedNumber(after number: Int) {
-        nextNumber = max(number + 1, max(nextNumber, defaults.integer(forKey: Self.nextNumberKey)))
+    /// The number the next generated name starts from. The counter is shared by every window, so it is read
+    /// from defaults; with daily reset on, a counter last used on another day starts again at 1.
+    private func startingNumber(on date: Date) -> Int {
+        let stored = max(1, defaults.integer(forKey: Self.nextNumberKey))
+        let resets = defaults.object(forKey: Self.resetNumberDailyKey) as? Bool ?? true
+        guard resets else { return stored }
+        return defaults.string(forKey: Self.numberDayKey) == Self.dayStamp(date) ? stored : 1
+    }
+
+    private func advanceGeneratedNumber(after number: Int, on date: Date) {
+        nextNumber = max(number + 1, startingNumber(on: date))
         defaults.set(nextNumber, forKey: Self.nextNumberKey)
+        defaults.set(Self.dayStamp(date), forKey: Self.numberDayKey)
+    }
+
+    private static func dayStamp(_ date: Date) -> String {
+        let day = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", day.year ?? 0, day.month ?? 0, day.day ?? 0)
     }
 
     private func updateTitle() {

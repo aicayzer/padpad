@@ -3,7 +3,7 @@ import KeyboardShortcuts
 import Observation
 
 enum EditingAction: String, CaseIterable, Identifiable, Codable {
-    case newFile, open, save, saveAs, restoreDefaultSize, copyAllContents
+    case newFile, open, save, saveAs, restoreDefaultSize, copyAllContents, copyPath
 
     var id: String { rawValue }
     var title: String {
@@ -14,6 +14,7 @@ enum EditingAction: String, CaseIterable, Identifiable, Codable {
         case .saveAs: "Save As"
         case .restoreDefaultSize: "Restore Default Size"
         case .copyAllContents: "Copy All Contents"
+        case .copyPath: "Copy Path"
         }
     }
     var defaultShortcut: KeyboardShortcuts.Shortcut {
@@ -24,6 +25,7 @@ enum EditingAction: String, CaseIterable, Identifiable, Codable {
         case .saveAs: .init(.s, modifiers: [.command, .shift])
         case .restoreDefaultSize: .init(.zero, modifiers: .command)
         case .copyAllContents: .init(.c, modifiers: [.command, .shift])
+        case .copyPath: .init(.c, modifiers: [.command, .option])
         }
     }
 }
@@ -46,7 +48,7 @@ final class EditingShortcuts {
             shortcuts = saved.compactMapValues { $0 }
             // Missing original actions were explicitly disabled. Only newly introduced
             // actions receive defaults, and existing assignments always take priority.
-            for action in [EditingAction.restoreDefaultSize, .copyAllContents] where !saved.keys.contains(action) {
+            for action in [EditingAction.restoreDefaultSize, .copyAllContents, .copyPath] where !saved.keys.contains(action) {
                 let shortcut = action.defaultShortcut
                 if globalShortcut() != shortcut && !shortcuts.values.contains(shortcut) {
                     shortcuts[action] = shortcut
@@ -54,7 +56,7 @@ final class EditingShortcuts {
             }
         } else {
             shortcuts = Self.standardShortcuts
-            for action in [EditingAction.restoreDefaultSize, .copyAllContents] where globalShortcut() == action.defaultShortcut {
+            for action in [EditingAction.restoreDefaultSize, .copyAllContents, .copyPath] where globalShortcut() == action.defaultShortcut {
                 shortcuts[action] = nil
             }
         }
@@ -89,6 +91,9 @@ final class EditingShortcuts {
             .init(.w, modifiers: [.command, .option]), .init(.q, modifiers: .command),
             .init(.comma, modifiers: .command), .init(.r, modifiers: .command)
         ]
+        if Self.editorShortcuts.contains(shortcut) {
+            return .disallow(reason: "The editor uses this shortcut for formatting. Choose another one.")
+        }
         let navigationKeys: Set<KeyboardShortcuts.Key> = [.leftArrow, .rightArrow, .upArrow, .downArrow, .delete, .deleteForward]
         if nativeCommands.contains(shortcut) || shortcut.key.map({ navigationKeys.contains($0) }) == true {
             return .disallow(reason: "PadPad or macOS already uses this shortcut. Choose another one.")
@@ -101,6 +106,17 @@ final class EditingShortcuts {
         }
         return .allow
     }
+
+    /// The editor's formatting keys, in `PadMarkdownEditorController.keymap`. A window shortcut would take them first.
+    static let editorShortcuts: Set<KeyboardShortcuts.Shortcut> = [
+        .init(.b, modifiers: .command), .init(.i, modifiers: .command), .init(.u, modifiers: .command),
+        .init(.e, modifiers: .command), .init(.k, modifiers: .command),
+        .init(.one, modifiers: [.command, .option]), .init(.two, modifiers: [.command, .option]),
+        .init(.three, modifiers: [.command, .option]), .init(.zero, modifiers: [.command, .option]),
+        .init(.b, modifiers: [.command, .shift]), .init(.e, modifiers: [.command, .shift]),
+        .init(.l, modifiers: [.command, .shift]), .init(.eight, modifiers: [.command, .shift]),
+        .init(.nine, modifiers: [.command, .shift])
+    ]
 
     func validateGlobal(_ shortcut: KeyboardShortcuts.Shortcut) -> KeyboardShortcuts.ValidationResult {
         if let action = EditingAction.allCases.first(where: { shortcuts[$0] == shortcut }) {

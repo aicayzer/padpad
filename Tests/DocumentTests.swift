@@ -90,7 +90,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         files.text = "draft"
         files.save()
-        #expect(files.notice == "Saved. Path copied.")
+        #expect(files.notice == "Saved")
         try await Task.sleep(for: .milliseconds(100))
         #expect(files.notice == nil)
         #expect(!files.rename(to: "../invalid"))
@@ -153,7 +153,7 @@ import Testing
         #expect(restored.currentFormat == .txt)
     }
 
-    @Test func dateNameAvoidsExistingFileAndCopiesPath() async throws {
+    @Test func dateNameAvoidsExistingFile() async throws {
         let (files, root, _, copiedPath) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let now = Date(timeIntervalSince1970: 1_790_113_017)
@@ -170,7 +170,110 @@ import Testing
         let saved = try #require(files.url)
         #expect(saved.pathExtension == "md")
         #expect(try String(contentsOf: saved, encoding: .utf8) == "# Direct file\n")
+        #expect(copiedPath() == nil)
+    }
+
+    @Test func savingCopiesThePathOnlyWhenTheSettingIsOn() throws {
+        let (files, root, defaults, copiedPath) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(!files.copiesPathAfterSaving)
+        files.text = "first"
+        files.save()
+        #expect(files.notice == "Saved")
+        #expect(files.noticeRevealsFile)
+        #expect(copiedPath() == nil)
+        files.copiesPathAfterSaving = true
+        #expect(defaults.bool(forKey: "pad.copyPathAfterSaving"))
+        files.newFile()
+        files.text = "second"
+        files.save()
+        #expect(files.notice == "Saved. Path copied.")
+        #expect(copiedPath() == files.url?.path)
+        // Only a new file's first save copies; saving it again leaves the clipboard alone.
+        let firstCopy = copiedPath()
+        files.text = "second edited"
+        files.save()
+        #expect(files.notice == "Saved")
+        #expect(copiedPath() == firstCopy)
+        files.resetQuickPadPreferences()
+        #expect(!files.copiesPathAfterSaving)
+        #expect(files.resetsNumberDaily)
+    }
+
+    @Test func copyPathCopiesAFileAndSavesADraftFirst() throws {
+        let (files, root, _, copiedPath) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(!files.canCopyPath)
+        files.copyFilePath()
+        #expect(files.url == nil)
+        #expect(copiedPath() == nil)
+        files.text = "draft"
+        #expect(files.canCopyPath)
+        files.copyFilePath()
+        let saved = try #require(files.url)
+        #expect(try String(contentsOf: saved, encoding: .utf8) == "draft")
         #expect(copiedPath() == saved.path)
+        #expect(files.notice == "Saved. Path copied.")
+        let opened = root.appending(path: "opened.txt")
+        try Data("opened".utf8).write(to: opened)
+        files.open(opened)
+        files.copyFilePath()
+        #expect(copiedPath() == opened.path)
+        #expect(files.notice == "Path copied")
+        #expect(files.noticeRevealsFile)
+    }
+
+    @Test func noticeStaysWhileHeld() async throws {
+        let (files, root, _, _) = try fixture(noticeDuration: .milliseconds(30))
+        defer { try? FileManager.default.removeItem(at: root) }
+        files.text = "draft"
+        files.save()
+        files.holdNotice(true)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(files.notice == "Saved")
+        files.holdNotice(false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(files.notice == nil)
+        #expect(!files.noticeRevealsFile)
+    }
+
+    @Test func numberingRestartsEachDayUnlessTurnedOff() throws {
+        let (files, root, defaults, _) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        files.nameParts = [.literal("Note-"), .token(.number)]
+        var day = Date(timeIntervalSince1970: 1_790_113_017)
+        files.currentDate = { day }
+        #expect(files.resetsNumberDaily)
+        // A counter left over from before daily numbering restarts too.
+        defaults.set(35, forKey: "pad.nextNumber")
+        #expect(files.namePreview == "Note-001.txt")
+        files.text = "one"
+        files.save()
+        #expect(files.displayName == "Note-001.txt")
+        files.newFile()
+        files.text = "two"
+        files.save()
+        #expect(files.displayName == "Note-002.txt")
+        day = day.addingTimeInterval(86_400)
+        #expect(files.namePreview == "Note-001.txt")
+        files.newFile()
+        files.text = "three"
+        files.save()
+        // The next day starts again at 1, and skips the name already taken.
+        #expect(files.displayName == "Note-003.txt")
+        files.nameParts = [.literal("Day-"), .token(.number)]
+        day = day.addingTimeInterval(86_400)
+        files.newFile()
+        files.text = "four"
+        files.save()
+        #expect(files.displayName == "Day-001.txt")
+        files.resetsNumberDaily = false
+        #expect(defaults.object(forKey: "pad.resetNumberDaily") as? Bool == false)
+        day = day.addingTimeInterval(86_400)
+        files.newFile()
+        files.text = "five"
+        files.save()
+        #expect(files.displayName == "Day-002.txt")
     }
 
     @Test func openedTextRoundTripsAndRefusesExternalOverwrite() throws {

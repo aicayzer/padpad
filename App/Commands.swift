@@ -71,6 +71,9 @@ struct AppCommands: Commands {
                 .disabled(!canEdit)
             Button("Copy as Markdown") { Task { await document.copyAllContents(asMarkdown: true) } }
                 .disabled(!canEdit || document.currentFormat != .md)
+            Button("Copy Path") { document.copyFilePath() }
+                .keyboardShortcut(document.editingShortcuts.shortcut(for: .copyPath)?.toSwiftUI)
+                .disabled(!canEdit || !document.canCopyPath)
         }
         CommandMenu("Format") {
             if document.currentFormat.usesEditor, let editor = document.markdownEditor {

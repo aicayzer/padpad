@@ -153,6 +153,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
             case .saveAs: Task { await files.saveAs() }
             case .restoreDefaultSize: restoreDefaultSize()
             case .copyAllContents: Task { await files.copyAllContents() }
+            case .copyPath: files.copyFilePath()
             }
             return true
         }

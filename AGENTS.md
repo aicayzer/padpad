@@ -19,7 +19,7 @@ Commands, tests and CI are in [DEVELOPMENT.md](DEVELOPMENT.md); distribution is 
 - The Aa control beside Share opens the formatting menu at every window width. It lists only the commands the loaded format supports, taken from InkKit command state: RTF shows alignment instead of headings, quotes and code blocks.
 - The right header orders Share, Aa and Save. Window and file actions stay in the native menus.
 - Formatting controls use neutral adaptive foreground colors, not the accent color.
-- Formatting shortcuts work independently of the menu. Restore Default Size and Copy All Contents use configurable local shortcut recorders.
+- Formatting shortcuts work independently of the menu. The editor keymap is in `PadMarkdownEditorController.keymap`, and window shortcuts may not use its keys. Restore Default Size and Copy All Contents use configurable local shortcut recorders.
 - The centered formatting toolbar stays behind the disabled `usesCenteredFormattingToolbar` switch in `App/Document/PadPanel.swift` for possible future use.
 
 ### Scratch text
@@ -29,7 +29,7 @@ Scratch text is intentionally temporary, because the quick pad is a scratch surf
 - With automatic saving off, closing hides the quick pad. Reopening within the configured time away restores the text; reopening after expiry starts empty, with no recovery archive or discard prompt.
 - Start the interval on dismissal and restart it after every reopen and dismiss cycle. Never expire active text. Settings and owned dialogs are not dismissal.
 - Do not discard scratch text on close or focus loss. It lives in memory only, so quitting does not preserve it.
-- Automatic saving and explicit Save preserve work as files. Expiry must never delete a saved file or silently discard edits to an opened file.
+- Automatic saving and explicit Save preserve work as files. Generated names never replace a file: the number skips taken names, and restarts at 1 each day unless that setting is off. Expiry must never delete a saved file or silently discard edits to an opened file.
 - Discarded-draft recovery is deferred. Do not add an archive or retention mechanism.
 
 ### Formats
@@ -45,6 +45,7 @@ Scratch text is intentionally temporary, because the quick pad is a scratch surf
 
 - Ordinary Copy and Copy All Contents export readable text plus semantic HTML, never Markdown-escaped plain text. Copy as Markdown explicitly exports source.
 - Copy All preserves the selection and respects existing shortcut bindings. If content retrieval fails, it leaves the clipboard untouched.
+- Copy Path copies a file window's path. In a draft with text it saves first, then copies. Saving copies a new file's path only when "Copy path after saving" is on; it is off by default, so Save leaves the clipboard alone.
 
 ### Messages
 

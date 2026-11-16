@@ -15,7 +15,7 @@ import Testing
             second.removePersistentDomain(forName: secondName)
         }
         let shortcuts = EditingShortcuts(defaults: first, globalShortcut: { nil })
-        let replacement = KeyboardShortcuts.Shortcut(.b, modifiers: [.command, .shift])
+        let replacement = KeyboardShortcuts.Shortcut(.j, modifiers: [.command, .shift])
         #expect(shortcuts.set(replacement, for: .newFile))
         #expect(shortcuts.set(nil, for: .open))
         let reloaded = EditingShortcuts(defaults: first, globalShortcut: { nil })
@@ -66,7 +66,7 @@ import Testing
         defer { defaults.removePersistentDomain(forName: name) }
         var global: KeyboardShortcuts.Shortcut?
         let shortcuts = EditingShortcuts(defaults: defaults, globalShortcut: { global })
-        let replacement = KeyboardShortcuts.Shortcut(.b, modifiers: .command)
+        let replacement = KeyboardShortcuts.Shortcut(.j, modifiers: .command)
         #expect(shortcuts.set(replacement, for: .newFile))
         global = EditingAction.newFile.defaultShortcut
         shortcuts.restoreDefaults()
@@ -86,6 +86,7 @@ import Testing
         #expect(shortcuts.shortcut(for: .open) == nil)
         #expect(shortcuts.shortcut(for: .copyAllContents) == nil)
         #expect(shortcuts.shortcut(for: .restoreDefaultSize) == EditingAction.restoreDefaultSize.defaultShortcut)
+        #expect(shortcuts.shortcut(for: .copyPath) == .init(.c, modifiers: [.command, .option]))
         #expect(shortcuts.set(nil, for: .save))
         #expect(shortcuts.set(copy, for: .copyAllContents))
         #expect(shortcuts.set(nil, for: .restoreDefaultSize))
@@ -135,17 +136,31 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let shortcuts = EditingShortcuts(defaults: defaults, globalShortcut: { nil })
-        #expect(shortcuts.set(.init(.b, modifiers: [.command, .shift]), for: .newFile))
+        #expect(shortcuts.set(.init(.j, modifiers: [.command, .shift]), for: .newFile))
         func event(_ key: KeyboardShortcuts.Key, _ character: String, _ modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
             try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
                 timestamp: 0, windowNumber: 0, context: nil, characters: character,
                 charactersIgnoringModifiers: character, isARepeat: false, keyCode: UInt16(key.rawValue)))
         }
-        #expect(shortcuts.action(for: try event(.b, "b", [.command, .shift])) == .newFile)
+        #expect(shortcuts.action(for: try event(.j, "j", [.command, .shift])) == .newFile)
         #expect(shortcuts.action(for: try event(.n, "n", .command)) == nil)
         #expect(shortcuts.action(for: try event(.b, "b", [])) == nil)
         #expect(shortcuts.action(for: try event(.c, "c", .command)) == nil)
         #expect(shortcuts.action(for: try event(.c, "c", [.command, .shift])) == .copyAllContents)
         #expect(shortcuts.action(for: try event(.zero, "0", .command)) == .restoreDefaultSize)
+        #expect(shortcuts.action(for: try event(.c, "c", [.command, .option])) == .copyPath)
+    }
+
+    @Test func editorFormattingKeysAreReserved() throws {
+        let name = "pad-editor-keys-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let shortcuts = EditingShortcuts(defaults: defaults, globalShortcut: { nil })
+        for shortcut in [KeyboardShortcuts.Shortcut(.l, modifiers: [.command, .shift]), .init(.eight, modifiers: [.command, .shift]),
+                         .init(.nine, modifiers: [.command, .shift]), .init(.e, modifiers: [.command, .shift])] {
+            #expect(shortcuts.validate(shortcut, for: .copyPath) != .allow)
+        }
+        #expect(shortcuts.validate(.init(.eight, modifiers: [.command, .option]), for: .copyPath) == .allow)
+        #expect(!EditingAction.allCases.contains { EditingShortcuts.editorShortcuts.contains($0.defaultShortcut) })
     }
 }

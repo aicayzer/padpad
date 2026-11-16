@@ -92,6 +92,7 @@ struct PadMarkdownToolbar: View {
         Group {
             formatToggle("Bulleted list", command: .bulletList)
             formatToggle("Numbered list", command: .orderedList)
+            if editor.documentFormat != .rtf { formatToggle("Checklist", command: .taskList) }
         }
     }
 

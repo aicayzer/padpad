@@ -4,7 +4,7 @@ import Observation
 import WebKit
 
 enum PadMarkdownFormatCommand: String {
-    case paragraph, heading, bold, italic, underline, code, codeBlock, quote, bulletList, orderedList, link
+    case paragraph, heading, bold, italic, underline, code, codeBlock, quote, bulletList, orderedList, taskList, link
     case alignLeft, alignCenter, alignRight, alignJustify
 }
 
@@ -657,13 +657,7 @@ final class PadMarkdownEditorController: NSObject, PadDiagnosticSource {
             setDiagnosticsEnabled(diagnosticsEnabled)
             applyAccent()
             applyReadingWidth()
-            call("setKeymap", json([
-                "bold": ["Mod-b"], "italic": ["Mod-i"], "underline": ["Mod-u"], "code": ["Mod-e"],
-                "heading1": ["Mod-Alt-1"], "heading2": ["Mod-Alt-2"],
-                "heading3": ["Mod-Alt-3"], "paragraph": ["Mod-Alt-0"],
-                "quote": ["Mod-Shift-b"], "bulletList": ["Mod-Alt-8"],
-                "orderedList": ["Mod-Alt-7"], "codeBlock": ["Mod-Alt-c"],
-            ]))
+            call("setKeymap", json(Self.keymap))
             applyPendingLoad()
         case "changed":
             guard let receivedGeneration = message["generation"] as? Int, receivedGeneration == generation,
@@ -772,6 +766,15 @@ extension PadMarkdownEditorController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { report(error) }
     // macOS can end an idle page's process, for example under memory pressure. Restart the page so saving and
     // closing still work; the owner reloads the text the editor last reported.
+    /// Formatting keys in ProseMirror notation. `EditingShortcuts.editorShortcuts` keeps window shortcuts off them.
+    static let keymap: [String: [String]] = [
+        "bold": ["Mod-b"], "italic": ["Mod-i"], "underline": ["Mod-u"], "code": ["Mod-e"],
+        "heading1": ["Mod-Alt-1"], "heading2": ["Mod-Alt-2"],
+        "heading3": ["Mod-Alt-3"], "paragraph": ["Mod-Alt-0"],
+        "quote": ["Mod-Shift-b"], "codeBlock": ["Mod-Shift-e"],
+        "bulletList": ["Mod-Shift-8"], "orderedList": ["Mod-Shift-9"], "taskList": ["Mod-Shift-l"],
+    ]
+
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         pageReady = false
         isReady = false

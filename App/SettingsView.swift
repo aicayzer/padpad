@@ -254,6 +254,10 @@ struct SettingsView: View {
                         }
                         PadNameField(parts: $document.nameParts).frame(height: 34)
                     }
+                    Toggle("Restart numbering each day", isOn: $document.resetsNumberDaily)
+                        .accessibilityIdentifier("resetNumberDaily")
+                    Toggle("Copy path after saving", isOn: $document.copiesPathAfterSaving)
+                        .accessibilityIdentifier("copyPathAfterSaving")
                 } header: { Text("Storage") } footer: {
                     if document.needsFolderSelection {
                         Text("Choose a folder here or when you first save.")
@@ -364,7 +368,7 @@ struct SettingsView: View {
             Section {
                 EditingShortcutSettings(shortcuts: document.editingShortcuts,
                                         actions: [.newFile, .open, .save, .saveAs, .copyAllContents,
-                                                  .restoreDefaultSize])
+                                                  .copyPath, .restoreDefaultSize])
             } header: {
                 Text("In PadPad")
             } footer: {

@@ -285,6 +285,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
             case .saveAs: Task { await files.saveAs() }
             case .restoreDefaultSize: restoreDefaultSize()
             case .copyAllContents: Task { await files.copyAllContents() }
+            case .copyPath: files.copyFilePath()
             }
             return true
         }
@@ -654,7 +655,12 @@ struct PadView: View {
         } else if let feedback = files.editorFeedback {
             PadMessageView(message: feedback.message, identifier: "editorFeedback", dismiss: { files.dismissMessage() })
         } else if let notice = files.notice {
-            PadMessageView(message: PadMessage(text: notice), identifier: "documentNotice")
+            if files.noticeRevealsFile {
+                PadMessageView(message: PadMessage(text: notice), identifier: "documentNotice",
+                               reveal: { files.revealInFinder() }, hold: { files.holdNotice($0) })
+            } else {
+                PadMessageView(message: PadMessage(text: notice), identifier: "documentNotice")
+            }
         }
     }
 
@@ -805,6 +811,11 @@ struct PadMessageView: View {
     let identifier: String
     /// Present for problems only: clicking anywhere on the pill dismisses it.
     var dismiss: (() -> Void)?
+    /// Present for a notice about a saved file: clicking it shows the file in Finder.
+    var reveal: (() -> Void)?
+    /// Keeps the notice on screen while the pointer is over it.
+    var hold: ((Bool) -> Void)?
+    @State private var hovering = false
 
     // Long enough for a sentence and its hint, short enough to stay a message and not a banner.
     static let maximumWidth: CGFloat = 420
@@ -824,6 +835,19 @@ struct PadMessageView: View {
                 .help("Dismiss")
                 .accessibilityLabel("Error: \([message.text, message.hint].compactMap(\.self).joined(separator: " "))")
                 .accessibilityHint("Dismiss")
+                .accessibilityIdentifier(identifier)
+            } else if let reveal {
+                Button(action: reveal) {
+                    pill { Text(message.text).underline(hovering).foregroundStyle(.secondary) }
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    hovering = inside
+                    hold?(inside)
+                }
+                .help("Show in Finder")
+                .accessibilityLabel(message.text)
+                .accessibilityHint("Shows the file in Finder")
                 .accessibilityIdentifier(identifier)
             } else {
                 pill { Text(message.text).foregroundStyle(.secondary) }

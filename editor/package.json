@@ -12,15 +12,15 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@aicayzer/inkkit": "0.7.1"
+    "@aicayzer/inkkit": "0.7.10"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
-    "jsdom": "^30.1.0",
-    "prettier": "^3.9.8",
+    "@types/node": "^26.6.6",
+    "jsdom": "^31.0.1",
+    "prettier": "^3.10.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0",
-    "vite-plugin-singlefile": "^2.3.3",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.8",
+    "vite-plugin-singlefile": "^2.3.4",
+    "vitest": "^5.1.0"
   }
 }

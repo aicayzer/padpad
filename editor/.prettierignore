@@ -1,3 +1,4 @@
 dist
 node_modules
 fixtures
+pnpm-lock.yaml

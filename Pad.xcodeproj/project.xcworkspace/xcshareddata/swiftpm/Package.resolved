@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/aicayzer/inkkit",
       "state" : {
-        "revision" : "1bb289a53591031a50cc836510a7f7c286831142",
-        "version" : "0.7.1"
+        "revision" : "1d04fc2fb7243fdb0c8a7ae7ed62a688b8e422e7",
+        "version" : "0.7.10"
       }
     },
     {

@@ -105,7 +105,7 @@ enum PadDiagnosticSanitizer {
 @MainActor
 @Observable
 final class PadDiagnostics {
-    enum Activity: String { case focus, load, snapshot, snapshotSucceeded, save, saveSucceeded, edit, buffer, refusal, error }
+    enum Activity: String { case focus, load, snapshot, snapshotSucceeded, save, saveSucceeded, edit, buffer, refusal, error, ended }
     private struct Source { weak var value: (any PadDiagnosticSource)? }
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "PadPad", category: "editor")
     static let preferenceKey = "recordDiagnosticActivity"
@@ -197,10 +197,10 @@ final class PadDiagnostics {
             nativeIncident = incident
         }
         if events.count > 200 { events.removeFirst(events.count - 200) }
-        if activity == .refusal || activity == .error || activity == .save || activity == .saveSucceeded || activity == .snapshot || activity == .snapshotSucceeded {
+        if activity == .refusal || activity == .error || activity == .ended || activity == .save || activity == .saveSucceeded || activity == .snapshot || activity == .snapshotSucceeded {
             Self.logger.info("Editor \(activity.rawValue, privacy: .public) format=\(format.rawValue, privacy: .public) code=\(code.map { PadDiagnosticSanitizer.code($0) } ?? "none", privacy: .public)")
         }
-        if activity == .refusal || activity == .error {
+        if activity == .refusal || activity == .error || activity == .ended {
             if nativeIncident == nil, !["composition", "not-ready", "stale-document", "operation-pending"].contains(PadDiagnosticSanitizer.code(code)) {
                 nativeIncident = ["triggerSequence": sequence, "events": events, "tail": [[String: Any]]()]
             }

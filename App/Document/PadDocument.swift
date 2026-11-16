@@ -312,6 +312,10 @@ final class PadDocument {
             guard let self, self.currentFormat.usesEditor, !self.onboarding.isPresented else { return }
             self.report(error, during: .editor)
         }
+        editor.onRestarted = { [weak self, weak editor] in
+            guard let self, let editor, self.markdownEditor === editor, self.currentFormat.usesEditor else { return }
+            self.reloadEditor()
+        }
         editor.onReady = { [weak self] in
             guard let self, !self.onboarding.isPresented, self.currentFormat.usesEditor else { return }
             guard !self.holdInitialReadingFocus() else { return }
@@ -398,6 +402,10 @@ final class PadDocument {
             guard id == documentID else { return false }
             text = latest ?? editorLoadedSource
             recordDiagnostic(.snapshotSucceeded)
+            return true
+        } catch PadMarkdownEditorError.unavailable where markdownEditor?.hasEnded == true && id == documentID {
+            // The editor's process is gone for good. `text` holds the last content it reported, so saving and
+            // closing go ahead with that copy; closing still asks about unsaved changes.
             return true
         } catch {
             report(error, during: .snapshot)

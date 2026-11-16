@@ -181,7 +181,7 @@ final class PadDocument {
     private static let namePartsKey = "pad.nameParts"
     private static let nextNumberKey = "pad.nextNumber"
 
-    private static var downloadsFolder: URL {
+    static var downloadsFolder: URL {
         // FileManager points inside the sandbox. This path only suggests a location in the chooser.
         guard let record = getpwuid(getuid()), let home = String(validatingCString: record.pointee.pw_dir) else {
             return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
@@ -1122,6 +1122,7 @@ final class PadDocument {
     }
 
     func close(now: Date = .now) {
+        if !snapshotApplied { recordDiagnostic(.close) }
         if !isQuickPad {
             Task { await closeFileWindow() }
             return

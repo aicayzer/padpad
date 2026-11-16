@@ -2,6 +2,7 @@ import AppKit
 import CoreFoundation
 import Observation
 import OSLog
+import UniformTypeIdentifiers
 
 @MainActor
 protocol PadDiagnosticSource: AnyObject {
@@ -51,7 +52,7 @@ enum PadDiagnosticSanitizer {
             "format": ["md", "rtf", "txt"], "mode": ["formatted", "source"],
             "code": codes, "reason": reasons,
             "kind": ["input", "composition", "focus", "selection", "operation", "preservation", "error", "enabled"],
-            "phase": ["before", "after", "start", "end", "in", "out", "begin", "success", "refused"],
+            "phase": ["before", "after", "start", "end", "in", "out", "begin", "success", "refused", "handled"],
             "input": ["text", "composition", "delete", "paste", "drop", "history", "format", "other"],
             "operation": ["snapshot", "edit", "history", "load", "configuration", "output", "selection", "lifecycle", "other"],
             "path": ["unchanged", "local", "regions", "whole"]
@@ -105,7 +106,7 @@ enum PadDiagnosticSanitizer {
 @MainActor
 @Observable
 final class PadDiagnostics {
-    enum Activity: String { case focus, load, snapshot, snapshotSucceeded, save, saveSucceeded, edit, buffer, refusal, error, ended }
+    enum Activity: String { case focus, load, snapshot, snapshotSucceeded, save, saveSucceeded, edit, buffer, refusal, error, ended, close }
     private struct Source { weak var value: (any PadDiagnosticSource)? }
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "PadPad", category: "editor")
     static let preferenceKey = "recordDiagnosticActivity"
@@ -115,7 +116,8 @@ final class PadDiagnostics {
     private var sources: [Source] = []
     private var sessionID = UUID()
     private var sequence = 0
-    private var started = ProcessInfo.processInfo.systemUptime
+    // Wall-clock time, so `startedAt` plus an event's `elapsedMs` is when it happened, across sleep.
+    private var started = Date()
     private var events: [[String: Any]] = []
     private var latestEngine: [String: Any]?
     private var nativeIncident: [String: Any]?
@@ -137,7 +139,7 @@ final class PadDiagnostics {
             previousReport = nil
             sessionID = UUID()
             sequence = 0
-            started = ProcessInfo.processInfo.systemUptime
+            started = Date()
             deleteCache()
             for source in sources { source.value?.setDiagnosticsEnabled(enabled) }
         }
@@ -184,7 +186,7 @@ final class PadDiagnostics {
                 count: Int? = nil, code: String? = nil, reason: String? = nil) {
         guard enabled else { return }
         sequence += 1
-        var event: [String: Any] = ["sequence": sequence, "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - started) * 1000), "activity": activity.rawValue,
+        var event: [String: Any] = ["sequence": sequence, "elapsedMs": Int(Date().timeIntervalSince(started) * 1000), "activity": activity.rawValue,
                                    "scope": scope.uuidString, "format": format.rawValue]
         if let generation { event["generation"] = max(0, generation) }
         if let count { event["count"] = min(1_000_000, max(0, count)) }
@@ -266,6 +268,7 @@ final class PadDiagnostics {
             guard enabled, epoch == expectedEpoch else { return nil }
             var result = envelope()
             result["editors"] = current
+            result["exportedAt"] = Self.timestamp(.now)
             guard let data = encoded(result) else { exportError = "Couldn’t create the diagnostic report. Try again."; return nil }
             persist(result)
             return data
@@ -273,13 +276,31 @@ final class PadDiagnostics {
         return encoded(envelope())
     }
 
-    func copyReport(to pasteboard: NSPasteboard = .general, writer: (([NSPasteboardWriting]) -> Bool)? = nil) async {
+    static func suggestedFilename(on date: Date = .now) -> String {
+        "PadPad Diagnostics \(date.formatted(.iso8601.year().month().day())).json"
+    }
+
+    /// Asks where to save the report, then writes it there.
+    func saveReport(parent: NSWindow?) async {
+        guard enabled else { return }
+        let picker = NSSavePanel()
+        picker.allowedContentTypes = [.json]
+        picker.allowsOtherFileTypes = false
+        picker.nameFieldStringValue = Self.suggestedFilename()
+        picker.directoryURL = PadDocument.downloadsFolder
+        let response: NSApplication.ModalResponse
+        if let parent { response = await picker.beginSheetModal(for: parent) }
+        else { response = picker.runModal() }
+        guard response == .OK, let url = picker.url else { return }
+        await saveReport(to: url)
+    }
+
+    func saveReport(to url: URL) async {
         guard enabled else { return }
         let expectedEpoch = epoch
-        guard let data = await report(), enabled, epoch == expectedEpoch,
-              let text = String(data: data, encoding: .utf8) else { return }
-        do { try PadClipboardContents(text: text).write(to: pasteboard, writer: writer) }
-        catch { exportError = "Couldn’t copy the diagnostic report. Try again." }
+        guard let data = await report(), enabled, epoch == expectedEpoch else { return }
+        do { try data.write(to: url, options: .atomic) }
+        catch { exportError = "Couldn’t save the diagnostic report. Choose another location and try again." }
     }
 
     private var editorVersion: String {
@@ -301,7 +322,7 @@ final class PadDiagnostics {
     private func envelope() -> [String: Any] {
         var result: [String: Any] = ["schemaVersion": 1, "app": "PadPad", "appVersion": Bundle.main.shortVersion,
                                    "appBuild": Bundle.main.buildNumber, "editorVersion": editorVersion, "osVersion": osVersion, "enabled": enabled,
-                                   "sessionId": sessionID.uuidString, "events": events]
+                                   "sessionId": sessionID.uuidString, "startedAt": Self.timestamp(started), "events": events]
         if enabled {
             if let latestEngine { result["engine"] = latestEngine }
             if let nativeIncident { result["nativeIncident"] = nativeIncident }
@@ -309,6 +330,8 @@ final class PadDiagnostics {
         }
         return result
     }
+
+    private static func timestamp(_ date: Date) -> String { date.formatted(.iso8601) }
 
     private func encoded(_ report: [String: Any]) -> Data? {
         var bounded = report
@@ -366,6 +389,9 @@ final class PadDiagnostics {
         if let version = input["osVersion"] as? String, version.count <= 14,
            version.range(of: "\\A[0-9]{1,4}(\\.[0-9]{1,4}){2}\\z", options: .regularExpression) != nil { clean["osVersion"] = version }
         if let session = input["sessionId"] as? String, UUID(uuidString: session) != nil { clean["sessionId"] = session }
+        if let started = input["startedAt"] as? String, started.count <= 32, (try? Date(started, strategy: .iso8601)) != nil {
+            clean["startedAt"] = started
+        }
         if let incident = input["engine"] as? [String: Any],
            let report = incident["report"].flatMap(PadDiagnosticSanitizer.report),
            let scope = incident["scope"] as? String, UUID(uuidString: scope) != nil {

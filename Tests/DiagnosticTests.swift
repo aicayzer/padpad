@@ -81,38 +81,65 @@ import Testing
         #expect(PadDiagnosticSanitizer.report(["schemaVersion": 2, "enabled": true]) == nil)
     }
 
-    @Test func failedDiagnosticCopyRestoresTheClipboard() async throws {
+    @Test func savedReportIsJSONWithWallClockTimes() async throws {
         let (defaults, cache, suite) = fixture()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appending(path: "\(suite)-export")
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: folder)
+        }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
         diagnostics.enabled = true
         defer { diagnostics.enabled = false }
-        let board = NSPasteboard.withUniqueName()
-        defer { board.releaseGlobally() }
-        try PadClipboardContents(text: "Previous", html: "<p>Previous</p>").write(to: board)
-        await diagnostics.copyReport(to: board, writer: { _ in false })
-        #expect(board.string(forType: .string) == "Previous")
-        #expect(board.string(forType: .html) == "<p>Previous</p>")
-        #expect(diagnostics.exportError != nil)
+        diagnostics.record(.ended, scope: UUID(), format: .md, generation: 2)
+        diagnostics.record(.close, scope: UUID(), format: .md)
+        let file = folder.appending(path: PadDiagnostics.suggestedFilename())
+        await diagnostics.saveReport(to: file)
+        #expect(diagnostics.exportError == nil)
+        #expect(file.pathExtension == "json")
+        let report = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        let startedText = try #require(report["startedAt"] as? String)
+        let exportedText = try #require(report["exportedAt"] as? String)
+        let started = try Date(startedText, strategy: .iso8601)
+        let exported = try Date(exportedText, strategy: .iso8601)
+        #expect(started <= exported)
+        let events = try #require(report["events"] as? [[String: Any]])
+        #expect(events.map { $0["activity"] as? String } == ["ended", "close"])
+        let incident = try #require(report["nativeIncident"] as? [String: Any])
+        #expect(incident["triggerSequence"] as? Int == 1)
+        let reopened = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        let reopenedData = try #require(await reopened.report())
+        let previous = try #require(JSONSerialization.jsonObject(with: reopenedData) as? [String: Any])
+        #expect((previous["previousIncident"] as? [String: Any])?["startedAt"] as? String == report["startedAt"] as? String)
     }
 
-    @Test func disabledDiagnosticCopyDoesNotTouchTheClipboardOrAskEditors() async throws {
+    @Test func failedDiagnosticSaveReportsAnError() async throws {
+        let (defaults, cache, suite) = fixture()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+        }
+        let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
+        diagnostics.enabled = true
+        defer { diagnostics.enabled = false }
+        let missing = FileManager.default.temporaryDirectory.appending(path: "\(suite)-missing/report.json")
+        await diagnostics.saveReport(to: missing)
+        #expect(diagnostics.exportError != nil)
+        #expect(!FileManager.default.fileExists(atPath: missing.path))
+    }
+
+    @Test func disabledDiagnosticSaveWritesNothingAndAsksNoEditor() async throws {
         let (defaults, cache, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }
         let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
         let source = DiagnosticSource()
         diagnostics.register(source)
-        let board = NSPasteboard.withUniqueName()
-        defer { board.releaseGlobally() }
-        try PadClipboardContents(text: "Previous", html: "<p>Previous</p>").write(to: board)
-        let count = board.changeCount
-        var writes = 0
-        await diagnostics.copyReport(to: board, writer: { _ in writes += 1; return true })
-        #expect(writes == 0)
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(suite).json")
+        await diagnostics.saveReport(to: file)
         #expect(source.reportRequests == 0)
-        #expect(board.changeCount == count)
-        #expect(board.string(forType: .string) == "Previous")
-        #expect(board.string(forType: .html) == "<p>Previous</p>")
+        #expect(!FileManager.default.fileExists(atPath: file.path))
     }
 
     @Test func reportTimeoutKeepsNativeIncidentAndIgnoresLateJavaScriptCompletion() async throws {
@@ -196,7 +223,7 @@ import Testing
         #expect(report["editorVersion"] as? String == metadata["editorVersion"] as? String)
     }
 
-    @Test(arguments: [false, true]) func cancellationDuringReportLeavesClipboardUntouched(reenable: Bool) async throws {
+    @Test(arguments: [false, true]) func cancellationDuringReportWritesNoFile(reenable: Bool) async throws {
         let (defaults, cache, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }
         let diagnostics = PadDiagnostics(defaults: defaults, cacheURL: cache)
@@ -207,13 +234,10 @@ import Testing
             if reenable { diagnostics.enabled = true }
         }
         diagnostics.register(source)
-        let board = NSPasteboard.withUniqueName()
-        defer { board.releaseGlobally() }
-        try PadClipboardContents(text: "Previous").write(to: board)
-        let count = board.changeCount
-        await diagnostics.copyReport(to: board)
-        #expect(board.string(forType: .string) == "Previous")
-        #expect(board.changeCount == count)
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(suite).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        await diagnostics.saveReport(to: file)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
     }
 
     @Test func lateIncidentCaptureDoesNotAttachToANewerDocumentGeneration() async throws {

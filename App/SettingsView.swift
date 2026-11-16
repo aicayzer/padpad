@@ -304,12 +304,13 @@ struct SettingsView: View {
             Section {
                 Toggle("Record diagnostic activity", isOn: $diagnostics.enabled)
                     .accessibilityIdentifier("recordDiagnosticActivity")
-                Button("Copy Diagnostic Report") {
-                    Task { await settings.diagnostics.copyReport() }
+                Button("Save Diagnostic Report…") {
+                    let parent = NSApp.keyWindow
+                    Task { await settings.diagnostics.saveReport(parent: parent) }
                 }
                 .tint(.primary)
                 .disabled(!diagnostics.enabled)
-                .accessibilityIdentifier("copyDiagnosticReport")
+                .accessibilityIdentifier("saveDiagnosticReport")
                 if let error = settings.diagnostics.exportError {
                     Text(error).foregroundStyle(Color("ErrorColor"))
                 }

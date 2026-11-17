@@ -22,27 +22,47 @@ Pull requests use GitHub-hosted `xcode-27` runners, never persistent personal ru
 
 The shared `Pad UI Tests` scheme exercises real keyboard and window interactions in an isolated desktop session. It uses launch-argument preferences to discard disposable scratch text and retains screenshots in the test result. Run it separately from all other GUI tests; it requires macOS UI testing permission. An in-process panel test does not establish that macOS accepted a foreground activation request.
 
+## Signing
+
+`scripts/render-local-signing.sh` writes the ignored `Config/Local.xcconfig` from variables that your credential manager supplies. Never edit or commit that file. Rerun the script, then `xcodegen generate`, whenever the signing setup changes.
+
+| Variable | Use |
+| --- | --- |
+| `APPLE_DEVELOPMENT_TEAM` | Required. The signing team. |
+| `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY` | The App Store Connect team API key, for provisioning and upload. Use the existing key; don't create another. |
+| `PAD_SIGNING_KEYCHAIN`, `PAD_KEYCHAIN_PASSWORD` | Optional. A dedicated keychain for signing over SSH. |
+| `APPLE_PROVISIONING_PROFILE`, `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY` | Archives only. The installed App Store profile, and certificate names if they differ from Apple Distribution and 3rd Party Mac Developer Installer. |
+
+- **On a Mac that you're signed in to,** builds sign from the login keychain. Pass the API key to `xcodebuild` with `-allowProvisioningUpdates`, `-authenticationKeyPath`, `-authenticationKeyID`, and `-authenticationKeyIssuerID`, so that Xcode creates or renews the certificate there.
+- **Over SSH,** the login keychain is locked, so name a dedicated keychain. The script unlocks the keychain and selects it with `OTHER_CODE_SIGN_FLAGS`. The keychain locks again in each new session, so build in the same credential-manager session. Keep the keychain in the user keychain search list, so that export finds its certificates. If the named keychain doesn't exist on the Mac, builds use the login keychain.
+
 ## First internal TestFlight build
 
-1. Merge a reviewed PR after CI passes. Set the version and initial build number in `project.yml`, regenerate, and commit. Verify the actual files, keyboard shortcuts, focus restoration, settings, sharing, external edits, and development/release isolation on the dedicated Mac.
-2. Register the distribution bundle identifier from `project.yml` in the developer account. Create a macOS App Store Connect record with the same identifier, name, primary language, and a stable SKU. Complete required compliance and beta metadata and create an internal testing group.
-3. Supply `APPLE_DEVELOPMENT_TEAM` through the existing credential manager and run `scripts/render-local-signing.sh`. It writes ignored `Config/Local.xcconfig`; never hand-edit or commit it. Regenerate the project. To keep signing out of the login keychain, keep the identities in a dedicated keychain, name it with `PAD_SIGNING_KEYCHAIN` and inject `PAD_KEYCHAIN_PASSWORD`: the script unlocks it and selects it with `OTHER_CODE_SIGN_FLAGS`. A Mac without that keychain, such as a development Mac where you are signed in, signs from its login keychain; pass the App Store Connect API key flags below so Xcode creates or renews the development certificate there. Run the build in the same credential-manager session, because the keychain locks again in a new SSH session. Command-line builds that need provisioning pass `-allowProvisioningUpdates` with the App Store Connect API key flags (`-authenticationKeyPath`, `-authenticationKeyID`, `-authenticationKeyIssuerID`).
-4. For a command-line archive, install the distribution application certificate, installer certificate, and matching App Store provisioning profile. Through the existing credential manager, provide `APPLE_DEVELOPMENT_TEAM`, `APPLE_PROVISIONING_PROFILE`, and optional certificate selectors `APPLE_DISTRIBUTION_IDENTITY` and `APPLE_INSTALLER_IDENTITY`; run `scripts/archive-testflight.sh BUILD_NUMBER` with an unused number. The defaults are Apple Distribution and 3rd Party Mac Developer Installer; select the exact installed application certificate type when different. The script renders app-only manual provisioning, supplies the team/certificate globally for package resource bundles, archives, and exports a package locally. Build and export subprocesses use a normal file-creation mask so installed app resources are readable by all users; a pre-export check rejects inaccessible bundle files. The parent output directory, logs, and signing options remain private. With `PAD_SIGNING_KEYCHAIN` and `PAD_KEYCHAIN_PASSWORD`, it unlocks and selects that keychain without printing the password; the keychain must be in the user search list so export can find its certificates. With `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_PRIVATE_KEY`, archive and export authenticate provisioning with the API key instead of the Xcode account. It never uploads. Use Xcode Organizer or the API-key upload path below to validate and upload through the intended account. Never commit signing identities, profiles, export credentials, or account-specific export options. Archive/export logs and options stay in ignored, private build output; inspect failures without publishing these files. To return to normal development signing, rerun `scripts/render-local-signing.sh` without `--distribution`.
-5. Wait for App Store Connect processing, resolve any compliance questions, and add the processed build to the internal group. Install it using TestFlight on the dedicated Mac and repeat the release smoke check. Record the build, processing status, group assignment, and installation evidence privately.
+1. Set the version and initial build number in `project.yml`, regenerate, and merge a reviewed pull request after CI passes. On the dedicated Mac, verify files, keyboard shortcuts, focus restoration, settings, sharing, external edits, and development and release isolation.
+2. Register the distribution bundle identifier from `project.yml` in the developer account. Create the macOS app record in App Store Connect with the same identifier, name, primary language, and a stable SKU. Complete the compliance and beta metadata, and create an internal testing group.
+3. Archive with an unused build number:
 
-An uploaded archive is not completion. The build must be installable by the internal tester. App Store publication and external beta review are separate milestones.
+   ```sh
+   scripts/archive-testflight.sh BUILD_NUMBER
+   ```
 
-## API-key upload from the dedicated Mac
+   The script renders distribution signing, archives, and exports a package to `build/TestFlight-BUILD_NUMBER/Export`. It refuses an existing output directory, checks that every file in the app is readable by all users, and keeps logs and signing options private. It never uploads. Afterward, rerun `scripts/render-local-signing.sh` without `--distribution` to return to development signing.
+4. Upload the package, as described in the next section.
+5. Wait for App Store Connect to process the build, answer any compliance questions, and add the build to the internal group. Install it with TestFlight on the dedicated Mac, repeat the smoke check, and record the build, group, and installation privately.
 
-Inject the existing App Store Connect team API key as `ASC_KEY_ID`, `ASC_ISSUER_ID`, and PEM `ASC_PRIVATE_KEY` through its credential-manager mapping. Do not create a new Apple key or copy the local CLI keychain as a substitute for the canonical source. Then run:
+An uploaded build isn't done until the internal tester can install it. App Store publication and external beta review are separate steps.
+
+## Upload with the API key
+
+Upload only after the final commit, verification, and archive, because this command uploads immediately:
 
 ```sh
-python3 scripts/upload-testflight.py build/TestFlight-N/Export/PadPad.pkg --wait
+python3 scripts/upload-testflight.py build/TestFlight-BUILD_NUMBER/Export/PadPad.pkg --wait
 ```
 
-Use the actual exported package filename. This command uploads immediately, so run it only after the final commit, verification, and archive are complete. It uses Xcode 27's bundled `altool`; no separate uploader installation is needed. The script renders the key into a private temporary directory under `_local`, removes it on normal completion or Python exception, and keeps tool output in a unique private log. It never prints the key or authentication token, and strips injected `PAD_`, `ASC_`, `APPLE_`, and `INFISICAL_` variables from the uploader subprocess. If the command fails or disconnects, inspect App Store Connect and the delivery log before retrying; an ambiguous response does not mean the upload failed.
+Use the exported package's actual filename. The script uses the `altool` that comes with Xcode, writes the key to a private temporary file that it removes, never prints the key or token, and strips `PAD_`, `ASC_`, `APPLE_`, and `INFISICAL_` variables from the uploader's environment. If the command fails or disconnects, check App Store Connect and the delivery log before you retry: an unclear response doesn't mean that the upload failed.
 
-The upload derives app identity and version from the signed package. After processing, confirm the intended app, version, build number, internal group, invitation, and TestFlight installation separately. API-key source mapping and account-specific IDs belong in private operations notes, not this repository.
+After processing, confirm the app, version, build number, internal group, invitation, and TestFlight installation. Keep the key's source and account identifiers in private notes, not in this repository.
 
 ## Xcode Cloud owner checklist
 

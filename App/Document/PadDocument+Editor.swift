@@ -20,6 +20,7 @@ extension PadDocument {
             }
         } catch { report(error, during: .print) }
     }
+
     func mountMarkdownEditor() {
         guard !onboarding.isPresented, currentFormat.usesEditor, markdownEditor == nil else { return }
         let editor = PadMarkdownEditorController()
@@ -65,6 +66,7 @@ extension PadDocument {
         editorLoadedDocumentID = documentID
         editor.load(text, format: currentFormat, documentID: documentID)
     }
+
     func acceptMarkdownContentClick(_ event: NSEvent) {
         guard event.type == .leftMouseDown, !onboarding.isPresented, currentFormat.usesEditor,
               let editor = markdownEditor, let window = editor.webView.window,
@@ -75,6 +77,7 @@ extension PadDocument {
         pendingReadingDocumentID = nil
         editor.contentWasClicked()
     }
+
     func holdInitialReadingFocus() -> Bool {
         guard pendingReadingDocumentID == documentID else { return false }
         guard let editor = markdownEditor, editor.isReady, let panel,
@@ -84,10 +87,12 @@ extension PadDocument {
         if editor.ownsFirstResponder { panel.prepareReading() }
         return true
     }
+
     /// Plain text can't keep an image, so a paste or drop of only an image changes nothing and says so.
     func refuseImage() {
         editorFeedback = PadMarkdownEditorFeedback(code: "image-unsupported", source: .edit)
     }
+
     func reloadEditor() {
         editorFeedback = nil
         editorLoadedSource = text
@@ -98,6 +103,7 @@ extension PadDocument {
             markdownEditor?.load(text, format: currentFormat, documentID: documentID)
         }
     }
+
     func captureLatestEditor() async -> Bool {
         guard !onboarding.isPresented, currentFormat.usesEditor, let editorSnapshot else { return true }
         recordDiagnostic(.snapshot)
@@ -121,6 +127,7 @@ extension PadDocument {
             return false
         }
     }
+
     // Web edits are asynchronous; hold document transitions until the final keystroke is read.
     func synchronizeEditorThen(_ action: @escaping @MainActor () -> Void) -> Bool {
         guard !snapshotApplied, currentFormat.usesEditor, editorSnapshot != nil else { return false }
@@ -136,15 +143,18 @@ extension PadDocument {
         }
         return true
     }
+
     var markdownOwnsFirstResponder: Bool {
         currentFormat.usesEditor && markdownEditor?.webView.window === NSApp.keyWindow
             && markdownEditor?.ownsFirstResponder == true
     }
+
     func pasteAsPlainText() {
         guard let value = NSPasteboard.general.string(forType: .string), !isBusy else { return }
         if markdownOwnsFirstResponder { markdownEditor?.pasteAsPlainText(value) }
         else { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
     }
+
     func copyAllContents(asMarkdown: Bool = false, to pasteboard: NSPasteboard = .general) async {
         guard !isBusy, !onboarding.isPresented else { return }
         operation = .transition

@@ -7,6 +7,7 @@ extension PadDocument {
         KeyboardShortcuts.onKeyDown(for: .pad) { [weak self] in self?.handleGlobalShortcut() }
         KeyboardShortcuts.onKeyUp(for: .pad) { [weak self] in self?.onboarding.releaseShortcut() }
     }
+
     /// Rehearsal advances only on an actual registered global-shortcut event.
     func handleGlobalShortcut() {
         guard !isBusy, workspace?.isTransitioning != true else { return }
@@ -17,6 +18,7 @@ extension PadDocument {
             toggle()
         }
     }
+
     func restartOnboarding() async {
         guard !isBusy else { return }
         operation = .transition
@@ -30,6 +32,7 @@ extension PadDocument {
         isActive = false
         show()
     }
+
     func finishOnboarding(includeExample: Bool) {
         guard !isBusy, onboarding.isPresented else { return }
         if includeExample, isPristineScratch {
@@ -53,9 +56,11 @@ extension PadDocument {
         show()
         panel?.resumeEditor()
     }
+
     private var isPristineScratch: Bool {
         url == nil && text.isEmpty && savedText.isEmpty && pendingName == nil
     }
+
     private func presentOnboardingIfNeeded() -> Bool {
         if onboarding.isPresented {
             show()
@@ -67,6 +72,7 @@ extension PadDocument {
         show()
         return true
     }
+
     func newFile(now: Date = .now) {
         if !isQuickPad, let workspace { workspace.quickPad.newFile(now: now); return }
         guard !isBusy else { return }
@@ -80,6 +86,7 @@ extension PadDocument {
         dismissedAt = nil
         show()
     }
+
     func toggle(now: Date = .now) {
         guard !isBusy else { return }
         if onboarding.isPresented { show(); return }
@@ -101,6 +108,7 @@ extension PadDocument {
             show()
         }
     }
+
     func showCurrent(now: Date = .now) {
         guard !isBusy else { return }
         if !onboarding.hasCompleted, !onboarding.isPresented,
@@ -112,6 +120,7 @@ extension PadDocument {
             toggle(now: now)
         }
     }
+
     func commandNew(now: Date = .now) {
         if !isQuickPad, let workspace { workspace.quickPad.commandNew(now: now); return }
         guard !isBusy else { return }
@@ -119,11 +128,13 @@ extension PadDocument {
         if presentOnboardingIfNeeded() { return }
         newFile(now: now)
     }
+
     private func isReusable(at now: Date) -> Bool {
         guard drafts.reusePeriod != .alwaysNew else { return false }
         guard let dismissedAt else { return true }
         return now.timeIntervalSince(dismissedAt) < TimeInterval(drafts.reusePeriod.rawValue * 60)
     }
+
     func resetDocument() {
         startsInReadingMode = false
         pendingReadingDocumentID = nil
@@ -141,6 +152,7 @@ extension PadDocument {
         pendingName = nil
         reloadEditor()
     }
+
     func close(now: Date = .now) {
         if !snapshotApplied { recordDiagnostic(.close) }
         if !isQuickPad {
@@ -172,6 +184,7 @@ extension PadDocument {
         isActive = false
         panel?.orderOut(nil)
     }
+
     func lostFocus() {
         guard isQuickPad else { return }
         DispatchQueue.main.async { [weak self] in
@@ -180,6 +193,7 @@ extension PadDocument {
             self.close()
         }
     }
+
     func resetQuickPadPreferences() {
         floating = true
         drafts.reset()
@@ -198,5 +212,6 @@ extension PadDocument {
         // Retained text cannot expire as an accidental consequence of resetting preferences.
         dismissedAt = nil
     }
+
     func expand() { panel?.toggleExpanded() }
 }

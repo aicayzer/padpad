@@ -10,6 +10,7 @@ extension PadDocument {
         operation = nil
         return captured && canTerminate()
     }
+
     func chooseFolder(parent: NSWindow? = nil) async {
         guard !isBusy else { return }
         operation = .filePanel
@@ -27,6 +28,7 @@ extension PadDocument {
             folderError = nil
         } catch { folderError = "PadPad can’t use this folder. Choose another one." }
     }
+
     private func saveFolderPicker(directory: URL) -> NSOpenPanel {
         let picker = NSOpenPanel()
         picker.canChooseFiles = false
@@ -38,6 +40,7 @@ extension PadDocument {
         picker.directoryURL = directory
         return picker
     }
+
     private func rememberSaveFolder(_ chosen: URL) throws {
         let accessing = chosen.startAccessingSecurityScopedResource()
         do {
@@ -54,6 +57,7 @@ extension PadDocument {
             throw error
         }
     }
+
     private func obtainSaveFolderAccess() throws -> Bool {
         guard !hasSaveFolderAccess else { return true }
         // Close, New Draft, and Quit wait synchronously for a save decision.
@@ -74,12 +78,14 @@ extension PadDocument {
         guard hasSaveFolderAccess else { throw PadError.missingFolder }
         return true
     }
+
     func forgetSaveFolder() {
         folderScope?.stopAccessingSecurityScopedResource()
         folderScope = nil
         defaults.removeObject(forKey: Self.folderBookmarkKey)
         folder = Self.downloadsFolder
     }
+
     func openPicker() async {
         guard !isBusy else { return }
         operation = .filePanel
@@ -89,6 +95,7 @@ extension PadDocument {
         guard let chosen else { return }
         if let workspace { workspace.open(chosen) } else { openDocument(chosen) }
     }
+
     private func presentOpenPanel() async -> URL? {
         let picker = NSOpenPanel()
         picker.allowedContentTypes = PadFormat.allCases.map(\.contentType)
@@ -96,6 +103,7 @@ extension PadDocument {
         guard await present(picker, parent: dialogParent) == .OK else { return nil }
         return picker.url
     }
+
     func open(_ file: URL) {
         if let workspace { workspace.open(file); return }
         if synchronizeEditorThen({ self.open(file) }) { return }
@@ -104,6 +112,7 @@ extension PadDocument {
         defer { operation = nil }
         openDocument(file)
     }
+
     /// Loads a file into this document. The workspace opens each file in a new file window; tests also load
     /// files into a quick pad without a workspace. Onboarding belongs to the quick pad, which the workspace never
     /// opens a file into, so opening never involves it.
@@ -153,6 +162,7 @@ extension PadDocument {
             return false
         }
     }
+
     func refreshIfNeeded() {
         guard url != nil, !isBusy, !onboarding.isPresented else { return }
         // A newly mounted web editor has already received the disk contents.
@@ -160,6 +170,7 @@ extension PadDocument {
         if synchronizeEditorThen({ self.refreshIfNeeded() }) { return }
         refreshCurrentFile()
     }
+
     private func refreshCurrentFile() {
         guard let url else { return }
         var observedBytes: Data?
@@ -194,13 +205,16 @@ extension PadDocument {
             report(error, during: .read, observedBytes: observedBytes)
         }
     }
+
     func save() {
         if synchronizeEditorThen({ self.save() }) { return }
         guard !isBusy else { return }
         saveCurrent()
     }
+
     /// A file window has a path to copy. A draft with text saves first, as Save does.
     var canCopyPath: Bool { url != nil || isDirty }
+
     func copyFilePath() {
         if let url {
             guard !isBusy else { return }
@@ -213,6 +227,7 @@ extension PadDocument {
         guard !isBusy, isDirty else { return }
         saveCurrent(copyingPath: true)
     }
+
     private func saveCurrent(copyingPath: Bool = false) {
         recordDiagnostic(.save)
         let namesFile = url == nil && pendingName == nil
@@ -265,6 +280,7 @@ extension PadDocument {
             recordDiagnostic(.saveSucceeded)
         } catch { report(error, during: namesFile ? .nameFormat : .save, observedBytes: observedBytes) }
     }
+
     func saveAs(targetFormat: PadFormat? = nil) async {
         guard !isBusy else { return }
         operation = .filePanel
@@ -355,6 +371,7 @@ extension PadDocument {
             report(error, during: .saveAs, observedBytes: observedBytes)
         }
     }
+
     private func presentSavePanel(directory: URL, name: String, targetFormat: PadFormat? = nil) async -> URL? {
         let picker = NSSavePanel()
         picker.allowedContentTypes = PadFormat.allCases.map(\.contentType)
@@ -367,6 +384,7 @@ extension PadDocument {
         guard await present(picker, parent: dialogParent) == .OK else { return nil }
         return picker.url
     }
+
     func share(from anchor: NSView? = nil) {
         if synchronizeEditorThen({ self.share(from: anchor) }) { return }
         guard canShare, let view = anchor ?? panel?.contentView else { return }
@@ -392,6 +410,7 @@ extension PadDocument {
             report(error, during: .share)
         }
     }
+
     func shareableURL(in temporaryFolder: URL = FileManager.default.temporaryDirectory) throws -> URL {
         guard !text.isEmpty else { throw PadError.emptyShare }
         if let url, !isDirty, let current = try? Data(contentsOf: url), current == baseline { return url }
@@ -405,6 +424,7 @@ extension PadDocument {
         try currentFormat.encode(text).write(to: snapshot, options: .atomic)
         return snapshot
     }
+
     func finishCurrent(retainingDocument: Bool = false) -> Bool {
         guard isDirty else { return true }
         if isQuickPad && drafts.saveAutomatically {
@@ -428,22 +448,26 @@ extension PadDocument {
         }
         return true
     }
+
     func canTerminate() -> Bool {
         guard !isBusy else { return false }
         operation = .transition
         defer { operation = nil }
         return finishCurrent()
     }
+
     func revealInFinder() {
         guard let url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+
     func captureForReset() async -> Bool {
         guard !isBusy else { return false }
         operation = .transition
         defer { operation = nil }
         return await captureLatestEditor()
     }
+
     func closeFileWindow() async {
         guard !isBusy else { return }
         operation = .transition
@@ -475,10 +499,12 @@ extension PadDocument {
         folderScope = nil
         workspace?.didClose(self)
     }
+
     func requestRename() {
         guard isActive, !isBusy, !onboarding.isPresented else { return }
         renameRequest += 1
     }
+
     @discardableResult
     func rename(to input: String) -> Bool {
         guard !isBusy else { return false }
@@ -531,6 +557,7 @@ extension PadDocument {
             return false
         }
     }
+
     private func canRenameInContainingFolder(_ source: URL) -> Bool {
         guard documentScope?.standardizedFileURL == source.standardizedFileURL else { return true }
         // A grant for one file does not authorize its new sibling name. Save As can request that grant.
@@ -538,6 +565,7 @@ extension PadDocument {
         let authorizedFolders = [FileManager.default.temporaryDirectory] + [folderScope].compactMap { $0 }
         return authorizedFolders.contains { directory.starts(with: $0.resolvingSymlinksInPath().pathComponents) }
     }
+
     private func saveGeneratedFile(_ bytes: Data) throws -> URL {
         let now = currentDate()
         while true {
@@ -553,6 +581,7 @@ extension PadDocument {
             return candidate.url
         }
     }
+
     private func present(_ picker: NSSavePanel, parent: NSWindow?) async -> NSApplication.ModalResponse {
         NSApp.activate()
         if let parent, parent.isVisible {
@@ -561,6 +590,7 @@ extension PadDocument {
         }
         return await picker.begin()
     }
+
     private func confirmFileClose() async -> PadUnsavedChangesDecision {
         guard let parent = dialogParent else { return confirmUnsavedChanges() }
         let alert = NSAlert()
@@ -579,6 +609,7 @@ extension PadDocument {
             }
         }
     }
+
     private func confirmUnsavedChanges() -> PadUnsavedChangesDecision {
         let alert = NSAlert()
         alert.messageText = "Save changes?"

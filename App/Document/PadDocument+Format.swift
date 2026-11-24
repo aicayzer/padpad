@@ -9,10 +9,12 @@ extension PadDocument {
         let next = drafts.enabledFormats[(index + 1) % drafts.enabledFormats.count]
         return next == currentFormat ? nil : next
     }
+
     func cycleFormat() async {
         guard let nextFormat else { return }
         await changeFormat(to: nextFormat)
     }
+
     /// Switches an unsaved quick-pad draft to another format. Markdown and plain text keep the exact source;
     /// RTF converts, and a conversion that loses something changes nothing until the person confirms it.
     func changeFormat(to target: PadFormat) async {
@@ -36,11 +38,13 @@ extension PadDocument {
         show()
         panel?.resumeEditor()
     }
+
     /// Changes a draft's format and text together. An empty text is valid in every format.
     func replaceDraft(format newFormat: PadFormat, text newText: String) {
         scratchFormat = newFormat
         text = newText
     }
+
     /// Converts text from the current format. Markdown and plain text share their source. Markdown and RTF
     /// convert in the editor; plain text and RTF convert with InkKitRTF.
     private func convert(_ content: String, to target: PadFormat) async throws -> PadConversion {
@@ -61,6 +65,7 @@ extension PadDocument {
             return try await editorConversion(target)
         }
     }
+
     /// The converted text, or nil when the conversion failed or the person kept the original.
     func confirmedConversion(of content: String, to target: PadFormat, savingCopy: Bool,
                                      requiresEnabledFormat: Bool = false) async -> PadConversion? {

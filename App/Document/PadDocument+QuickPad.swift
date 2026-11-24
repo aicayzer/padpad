@@ -226,30 +226,55 @@ extension PadDocument {
 
     func expand() { panel?.toggleExpanded() }
 
-    /// Adds text from Shortcuts to the end of the quick pad's document and shows it. Showing follows the usual
-    /// rules, so a draft past its clear time is cleared first and the text starts a new one.
-    func add(_ addition: String) async throws {
+    /// Adds text from Shortcuts to the end of the quick pad's document and shows it. A hidden pad follows the
+    /// usual clearing rules first, so a draft past its clear time clears and the text starts a new one.
+    func add(_ addition: String, now: Date = .now) async throws {
         guard isQuickPad, !addition.isEmpty else { return }
         guard onboarding.hasCompleted, !onboarding.isPresented else { throw PadIntentError.introductionNotFinished }
-        if !isVisible { showCurrent() }
-        // Read the editor's latest text first, so nothing typed is lost; an editor still loading already has `text`.
-        if currentFormat.usesEditor, markdownEditor?.isReady == true {
-            guard await captureLatestEditor() else { throw PadIntentError.busy }
+        // Another operation may replace the document when it finishes, which would lose the added text.
+        guard !isBusy, workspace?.isTransitioning != true else { throw PadIntentError.busy }
+        operation = .transition
+        var explains = false
+        if isVisible {
+            // The editor holds the latest text. Reloading it before it has loaded would drop typing it buffered.
+            if currentFormat.usesEditor {
+                guard markdownEditor?.isReady == true, await captureLatestEditor() else {
+                    operation = nil
+                    throw PadIntentError.busy
+                }
+            }
+        } else {
+            // Closing captured the editor, so `text` is current.
+            explains = clearIfExpired(now: now)
         }
-        switch currentFormat {
+        do {
+            text = try Self.appending(addition, to: text, format: currentFormat)
+        } catch {
+            operation = nil
+            throw error
+        }
+        reloadEditor()
+        operation = nil
+        show()
+        panel?.resumeEditor()
+        if explains { present(.draftKept(clearing: drafts.clearingDescription)) }
+    }
+
+    /// Markdown starts the addition as a new paragraph, plain text on a new line and RTF as new paragraphs.
+    /// Existing text, including blank lines at its end, is kept as it is.
+    static func appending(_ addition: String, to text: String, format: PadFormat) throws -> String {
+        switch format {
         case .rtf:
             var document = try PadRichText.document(from: text)
             let added = RichTextDocument(plainText: addition).blocks
             document.blocks = document.plainText.isEmpty ? added : document.blocks + added
-            text = try PadRichText.text(for: document)
+            return try PadRichText.text(for: document)
         case .md, .txt:
-            let separator = currentFormat == .md ? "\n\n" : "\n"
-            let trimmed = text.replacing(/\n+$/, with: "")
-            text = trimmed.isEmpty ? addition : trimmed + separator + addition
+            guard !text.isEmpty else { return addition }
+            let needed = format == .md ? 2 : 1
+            let present = text.reversed().prefix { $0 == "\n" }.count
+            return text + String(repeating: "\n", count: max(0, needed - present)) + addition
         }
-        reloadEditor()
-        show()
-        panel?.resumeEditor()
     }
 }
 

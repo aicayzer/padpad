@@ -323,11 +323,44 @@ import Testing
         document.onboarding.complete()
         try await document.add("First")
         #expect(document.text == "First")
-        document.text += "\n\n"
         try await document.add("Second")
         #expect(document.text == expected)
         #expect(document.currentFormat == format)
         #expect(try fixture.savedFiles().isEmpty)
+    }
+
+    @Test func addingKeepsAuthoredBlankLines() throws {
+        #expect(try PadDocument.appending("Next", to: "Para\n", format: .md) == "Para\n\nNext")
+        #expect(try PadDocument.appending("Next", to: "Para\n\n\n\n", format: .md) == "Para\n\n\n\nNext")
+        #expect(try PadDocument.appending("Next", to: "\n\n\n", format: .md) == "\n\n\nNext")
+        #expect(try PadDocument.appending("Next", to: "Line\n", format: .txt) == "Line\nNext")
+        #expect(try PadDocument.appending("Next", to: "", format: .txt) == "Next")
+    }
+
+    @Test func addingRefusesWhileAnotherOperationIsRunning() async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.onboarding.complete()
+        document.text = "draft"
+        document.operation = .filePanel
+        await #expect(throws: PadIntentError.busy) { try await document.add("more") }
+        #expect(document.text == "draft")
+        document.operation = nil
+    }
+
+    @Test func addingExplainsTheFirstClearingItSkips() async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.onboarding.complete()
+        document.drafts.explainedClearing = false
+        let start = Date.now.addingTimeInterval(-3_600)
+        document.text = "kept"
+        document.close(now: start)
+        try await document.add("more")
+        #expect(document.text == "kept\n\nmore")
+        #expect(fixture.alerts.alerts.count == 1)
     }
 
     @Test func addingFromShortcutsAppendsParagraphsToAnRTFDraft() async throws {

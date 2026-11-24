@@ -6,7 +6,6 @@ struct SettingsView: View {
     @Environment(PadDocument.self) private var document
     @Environment(PadWorkspace.self) private var workspace
     @State private var login = LoginItemSettings()
-    @State private var shortcut = KeyboardShortcuts.getShortcut(for: .pad)
     @State private var settingsWindow: NSWindow?
     @State private var showingResetConfirmation = false
     @State private var resetting = false
@@ -116,9 +115,6 @@ struct SettingsView: View {
             } header: { Text("PadPad") } footer: {
                 Text("File windows appear in the Dock while they are open.")
                 if let error = settings.activationPolicyError { Text(error).foregroundStyle(Color("ErrorColor")) }
-                if !settings.showInDock && !settings.menuBarItem, let shortcut {
-                    Text("Open \(Bundle.main.displayName) with \(shortcut.description).")
-                }
             }
 
         }.formStyle(.grouped)
@@ -282,13 +278,13 @@ struct SettingsView: View {
     }
 
     private var draftExplanation: String {
-        if document.drafts.saveAutomatically {
-            return "Quick pad saves on close or when switching apps. Save opened files manually."
+        let drafts = document.drafts
+        let fresh = drafts.reusePeriod == .alwaysNew ? "each time you open it"
+            : "when you open it \(drafts.reusePeriod.title) after closing it"
+        if drafts.saveAutomatically {
+            return "The quick pad saves its draft when you close it or switch apps, and starts a new draft \(fresh)."
         }
-        if document.drafts.reusePeriod == .alwaysNew {
-            return "Clears temporary drafts on reopening. Saved files are kept."
-        }
-        return "Clears temporary drafts after \(document.drafts.reusePeriod.title) away. Saved files are kept."
+        return "Unsaved drafts clear \(drafts.clearingDescription). Saved files are kept."
     }
 
     private var about: some View {
@@ -347,7 +343,6 @@ struct SettingsView: View {
                 resetting = true
                 Task {
                     await workspace.resetApp()
-                    shortcut = KeyboardShortcuts.getShortcut(for: .pad)
                     login.refresh()
                     resetting = false
                 }
@@ -360,9 +355,7 @@ struct SettingsView: View {
     private var shortcuts: some View {
         Form {
             Section("Global shortcut") {
-                KeyboardShortcuts.Recorder("Show or hide \(Bundle.main.displayName)", name: .pad) { value in
-                    shortcut = value
-                }
+                KeyboardShortcuts.Recorder("Show or hide \(Bundle.main.displayName)", name: .pad)
                 .shortcutValidation { document.editingShortcuts.validateGlobal($0) }
             }
             Section {

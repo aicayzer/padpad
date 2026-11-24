@@ -28,9 +28,22 @@ struct PadAlert: Equatable {
     let title: String
     let message: String
     var action: Action?
+    /// The alert informs, so OK is the default button and the action is the alternative.
+    var informs = false
 
     /// An alert with a next step offers it as the default button beside Cancel; otherwise it offers OK.
-    var buttons: [String] { action.map { [$0.title, "Cancel"] } ?? ["OK"] }
+    /// An informing alert offers OK first, then its next step.
+    var buttons: [String] {
+        guard let action else { return ["OK"] }
+        return informs ? ["OK", action.title] : [action.title, "Cancel"]
+    }
+
+    /// Explains, the first time it happens, that a closed draft would have cleared and was kept.
+    static func draftKept(clearing: String) -> PadAlert {
+        PadAlert(title: "Drafts clear \(clearing)",
+                 message: "This draft was kept this time. To keep a draft, save it.",
+                 action: .openSettings, informs: true)
+    }
 
     /// Shows an alert, then reports whether the person chose its action.
     typealias Presenter = @MainActor (PadAlert, NSWindow?, @escaping @MainActor (Bool) -> Void) -> Void
@@ -42,16 +55,17 @@ struct PadAlert: Equatable {
         panel.informativeText = alert.message
         for button in alert.buttons { panel.addButton(withTitle: button) }
         let hasAction = alert.action != nil
+        let actionResponse: NSApplication.ModalResponse = alert.informs ? .alertSecondButtonReturn : .alertFirstButtonReturn
         NSApp.activate()
         if let window, window.isVisible {
             panel.beginSheetModal(for: window) { response in
-                MainActor.assumeIsolated { completion(hasAction && response == .alertFirstButtonReturn) }
+                MainActor.assumeIsolated { completion(hasAction && response == actionResponse) }
             }
         } else {
             // Let the failed operation finish before starting a modal session.
             DispatchQueue.main.async {
                 panel.window.level = .modalPanel
-                completion(hasAction && panel.runModal() == .alertFirstButtonReturn)
+                completion(hasAction && panel.runModal() == actionResponse)
             }
         }
     }
@@ -109,7 +123,6 @@ enum PadProblem: Equatable {
         case .invalidName:
             return .message(PadMessage(text: "This file name isn’t valid.", hint: "Names can’t include “/”, “\\”, or “:”."))
         case .nameExists: return .message(nameExists)
-        case .emptyShare: return .message(PadMessage(text: "Write something before sharing."))
         case .unsupported where context == .open:
             return .alert(PadAlert(title: "PadPad can’t open this type of file",
                                    message: "Choose a Markdown (.md), plain text (.txt), or RTF (.rtf) file.", action: .chooseFile))

@@ -12,13 +12,15 @@ import Testing
         selectOpenFile: (@MainActor () async -> URL?)? = nil,
         selectSaveFile: (@MainActor (URL, String) async -> URL?)? = nil,
         resolveUnsavedChanges: @escaping @MainActor () -> PadUnsavedChangesDecision = { .cancel },
-        alerts: AlertRecorder? = nil
+        alerts: AlertRecorder? = nil,
+        storedPreferences: Bool = true
     ) throws -> (PadDocument, URL, UserDefaults, () -> String?) {
         let root = FileManager.default.temporaryDirectory.appending(path: "pad-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let suite = "pad-tests-\(UUID().uuidString)"
         let defaults = suppliedDefaults ?? UserDefaults(suiteName: suite)!
         if suppliedDefaults == nil, let format { defaults.set(format.rawValue, forKey: "pad.format") }
+        if suppliedDefaults == nil, storedPreferences { defaults.setLifecyclePreferences(saveAutomatically: true) }
         var copiedPath: String?
         let files = PadDocument(defaults: defaults, defaultFolder: root,
                             presentsWindow: false, noticeDuration: noticeDuration, copyPath: { copiedPath = $0 },
@@ -32,6 +34,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set("txt", forKey: "pad.format")
+        defaults.setLifecyclePreferences(saveAutomatically: true)
         var requests = 0
         let document = PadDocument(defaults: defaults, presentsWindow: false, copyPath: { _ in },
                                    selectSaveFolder: { _ in requests += 1; return nil })
@@ -60,6 +63,7 @@ import Testing
             try? FileManager.default.removeItem(at: root)
         }
         defaults.set("txt", forKey: "pad.format")
+        defaults.setLifecyclePreferences(saveAutomatically: true)
         var requests = 0
         let document = PadDocument(defaults: defaults, presentsWindow: false, copyPath: { _ in },
                                    selectSaveFolder: { _ in requests += 1; return root })
@@ -136,16 +140,17 @@ import Testing
     }
 
     @Test func defaultsAndPreferencesPersist() throws {
-        let (files, root, defaults, _) = try fixture(format: nil)
+        let (files, root, defaults, _) = try fixture(format: nil, storedPreferences: false)
         defer { try? FileManager.default.removeItem(at: root) }
         #expect(files.drafts.format == .md)
-        #expect(files.drafts.saveAutomatically)
-        #expect(files.drafts.reusePeriod == .fifteenMinutes)
+        #expect(!files.drafts.saveAutomatically)
+        #expect(files.drafts.reusePeriod == .thirtyMinutes)
+        #expect(!files.drafts.explainedClearing)
         files.drafts.format = .txt
-        files.drafts.saveAutomatically = false
+        files.drafts.saveAutomatically = true
         files.drafts.reusePeriod = .fiveMinutes
         #expect(defaults.string(forKey: "pad.format") == "txt")
-        #expect(defaults.bool(forKey: "pad.saveAutomatically") == false)
+        #expect(defaults.bool(forKey: "pad.saveAutomatically"))
         #expect(defaults.integer(forKey: "pad.reusePeriod") == 5)
         let (restored, restoredRoot, _, _) = try fixture(defaults: defaults)
         defer { try? FileManager.default.removeItem(at: restoredRoot) }
@@ -198,6 +203,24 @@ import Testing
         files.resetQuickPadPreferences()
         #expect(!files.drafts.copiesPathAfterSaving)
         #expect(files.drafts.resetsNumberDaily)
+        // Reset matches a new install: no automatic saving, a 30-minute clear period, and the explanation again.
+        #expect(!files.drafts.saveAutomatically)
+        #expect(files.drafts.reusePeriod == .thirtyMinutes)
+        #expect(!files.drafts.explainedClearing)
+    }
+
+    @Test func saveConfirmsAnUpToDateFileWithoutRewritingIt() throws {
+        let (files, root, _, _) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        files.text = "kept"
+        files.save()
+        let url = try #require(files.url)
+        #expect(files.isSaved)
+        let marker = Date(timeIntervalSinceReferenceDate: 0)
+        try FileManager.default.setAttributes([.modificationDate: marker], ofItemAtPath: url.path)
+        files.save()
+        #expect(files.notice == "Saved")
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == marker)
     }
 
     @Test func launchArgumentsOverrideStoredSavingAndNumberingSettings() throws {
@@ -407,7 +430,7 @@ import Testing
         #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).count == 1)
     }
 
-    @Test func shortcutKeepsSavedDocumentPastDraftInterval() throws {
+    @Test func shortcutStartsAFreshDraftOnceASavedPadHasBeenAwayLongEnough() throws {
         let (files, root, _, _) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let start = Date(timeIntervalSince1970: 1_790_113_017)
@@ -420,9 +443,22 @@ import Testing
         #expect(files.url == saved)
         files.close(now: start.addingTimeInterval(14 * 60))
         files.toggle(now: start.addingTimeInterval(29 * 60))
-        #expect(files.text == "hello world")
-        #expect(files.url == saved)
+        #expect(files.text.isEmpty)
+        #expect(files.url == nil)
+        #expect(try String(contentsOf: saved, encoding: .utf8) == "hello world")
         #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).count == 1)
+    }
+
+    @Test func emptyDraftNeverBecomesAFile() throws {
+        let (files, root, _, _) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        files.newFile()
+        #expect(!files.canSave)
+        // The keyboard shortcut reaches save() even while the button is disabled.
+        files.save()
+        files.close()
+        #expect(files.url == nil)
+        #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).isEmpty)
     }
 
     @Test func sharingDirtyTextUsesTemporaryCopyWithoutChangingOriginal() throws {
@@ -999,8 +1035,9 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         files.drafts.format = .md
         files.newFile()
-        #expect(files.displayName == "Untitled")
-        #expect(files.editableName == "Untitled")
+        #expect(files.displayName == "Draft")
+        // Renaming an unnamed draft starts from the name Save would give it.
+        #expect(files.editableName.hasSuffix("-001"))
         #expect(files.rename(to: "Trip notes"))
         #expect(files.displayName == "Trip notes.md")
         #expect(files.editableName == "Trip notes")
@@ -1013,7 +1050,7 @@ import Testing
         #expect(files.displayName == "Travel.md")
         #expect(defaults.integer(forKey: "pad.nextNumber") == 0)
         files.newFile()
-        #expect(files.displayName == "Untitled")
+        #expect(files.displayName == "Draft")
     }
 
     @Test func renamingDirtyFileMovesSavedBytesAndPreservesEdits() throws {
@@ -1116,7 +1153,7 @@ import Testing
         files.text = "scratch"
         #expect(!files.rename(to: "existing"))
         #expect(files.url == nil)
-        #expect(files.displayName == "Untitled")
+        #expect(files.displayName == "Draft")
         #expect(files.isDirty)
         #expect(files.error == PadError.nameExists.message())
         #expect(try String(contentsOf: existing, encoding: .utf8) == "keep")

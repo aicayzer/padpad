@@ -177,6 +177,7 @@ private struct OnboardingDocumentFixture {
         suite = "pad-onboarding-document-tests-\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set(defaultFormat.rawValue, forKey: "pad.format")
+        defaults.setLifecyclePreferences(saveAutomatically: true)
         root = FileManager.default.temporaryDirectory.appending(path: suite)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,

@@ -36,7 +36,10 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
 
     override func close() { files.close() }
     func finishClosing() { super.close() }
-    func toggleExpanded() { zoom(nil) }
+    func toggleExpanded() {
+        zoom(nil)
+        files.isExpanded = isZoomed
+    }
 
     func restoreDefaultSize(animate: Bool = true) {
         guard !styleMask.contains(.fullScreen), let screen = screen ?? NSScreen.main else { return }
@@ -45,6 +48,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
         let size = NSSize(width: min(preferred.width, visible.width), height: min(preferred.height, visible.height))
         setFrame(NSRect(origin: frame.origin, size: size), display: true, animate: animate)
         center()
+        files.isExpanded = false
         constrainToAvailableScreen()
     }
 

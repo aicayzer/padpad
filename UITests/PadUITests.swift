@@ -12,10 +12,11 @@ final class PadUITests: PadUITestCase {
         app.typeKey("r", modifierFlags: .command)
         let name = app.textFields["Name"].firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(name.value as? String, "Untitled")
+        // An unnamed draft offers the name Save would give it.
+        XCTAssertFalse((name.value as? String ?? "").isEmpty, app.debugDescription)
         app.typeText("Invalid/name")
         app.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(app.staticTexts["Untitled"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Draft"].firstMatch.waitForExistence(timeout: 5))
         let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: name)
         XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 5), .completed)
         app.typeKey(.downArrow, modifierFlags: .command)
@@ -76,7 +77,7 @@ final class PadUITests: PadUITestCase {
         expectValue(original, in: editor)
         attach(app.screenshot(), name: "Pad editor after launch")
 
-        app.staticTexts["Untitled"].firstMatch.doubleClick()
+        app.staticTexts["Draft"].firstMatch.doubleClick()
         app.typeText("UI Test Draft")
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(app.staticTexts["UI Test Draft.txt"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
@@ -121,7 +122,7 @@ final class PadUITests: PadUITestCase {
         XCTAssertTrue(discard.waitForExistence(timeout: 5), app.debugDescription)
         discard.click()
         expectValue("", in: editor)
-        XCTAssertTrue(app.staticTexts["Untitled"].firstMatch.exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Draft"].firstMatch.exists, app.debugDescription)
         app.typeText("Fresh disposable scratch")
         expectValue("Fresh disposable scratch", in: editor)
         attach(app.screenshot(), name: "Pad fresh file from Command N")

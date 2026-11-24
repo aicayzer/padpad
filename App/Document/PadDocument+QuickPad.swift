@@ -96,14 +96,18 @@ extension PadDocument {
         guard !isBusy else { return }
         if isVisible {
             close(now: now)
-        } else if url != nil {
+        } else if isReusable(at: now) || (url != nil && isDirty) {
+            // A saved file with unsaved edits never clears, however long the pad was closed.
+            show()
             // Show before capturing: an offscreen WebKit view may not answer a snapshot.
+            if url != nil { refreshIfNeeded() }
+        } else if url == nil, !text.isEmpty, !drafts.explainedClearing {
+            // The first draft that would clear is kept, and PadPad explains once how drafts clear.
+            drafts.explainedClearing = true
             show()
-            refreshIfNeeded()
-        } else if isReusable(at: now) {
-            show()
+            present(.draftKept(clearing: drafts.clearingDescription))
         } else {
-            // Expired temporary drafts deliberately clear without a save prompt.
+            // The time away has passed. A saved file stays on disk; an unsaved draft clears without a prompt.
             resetDocument()
             show()
         }

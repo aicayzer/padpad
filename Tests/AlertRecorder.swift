@@ -34,3 +34,13 @@ extension PadError {
     func message(during context: PadProblem.Context = .rename) -> PadMessage? { expectedMessage(self, during: context) }
     func alert(during context: PadProblem.Context = .save) -> PadAlert? { expectedAlert(self, during: context) }
 }
+
+extension UserDefaults {
+    /// Stores the draft lifecycle settings most tests were written against: a 15-minute clear period, the
+    /// one-time clearing explanation already shown, and automatic saving as given.
+    func setLifecyclePreferences(saveAutomatically: Bool) {
+        set(saveAutomatically, forKey: "pad.saveAutomatically")
+        set(PadReuse.fifteenMinutes.rawValue, forKey: "pad.reusePeriod")
+        set(true, forKey: "pad.explainedClearing")
+    }
+}

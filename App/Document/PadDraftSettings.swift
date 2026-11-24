@@ -53,8 +53,13 @@ final class PadDraftSettings {
             if let data = try? JSONEncoder().encode(nameParts) { defaults.set(data, forKey: Keys.nameParts) }
         }
     }
+    /// Whether PadPad has explained, once, that a draft would have cleared. Reset App explains it again.
+    var explainedClearing: Bool {
+        didSet { defaults.set(explainedClearing, forKey: Keys.explainedClearing) }
+    }
     private var nextNumber: Int
     private let defaults: UserDefaults
+    static let defaultReusePeriod = PadReuse.thirtyMinutes
 
     private enum Keys {
         static let format = "pad.format"
@@ -66,6 +71,7 @@ final class PadDraftSettings {
         static let numberDay = "pad.numberDay"
         static let resetNumberDaily = "pad.resetNumberDaily"
         static let copyPathAfterSaving = "pad.copyPathAfterSaving"
+        static let explainedClearing = "pad.explainedClearing"
     }
 
     /// Only the quick pad's settings correct invalid stored formats; a file document reading them changes nothing.
@@ -83,8 +89,9 @@ final class PadDraftSettings {
             if initialFormat != storedDefault { defaults.set(initialFormat.rawValue, forKey: Keys.format) }
         }
         // `bool(forKey:)` also reads launch-argument overrides, which arrive as strings.
-        saveAutomatically = defaults.object(forKey: Keys.saveAutomatically) == nil ? true : defaults.bool(forKey: Keys.saveAutomatically)
-        reusePeriod = PadReuse(rawValue: defaults.object(forKey: Keys.reusePeriod) as? Int ?? 15) ?? .fifteenMinutes
+        saveAutomatically = defaults.bool(forKey: Keys.saveAutomatically)
+        reusePeriod = (defaults.object(forKey: Keys.reusePeriod) as? Int).flatMap(PadReuse.init(rawValue:)) ?? Self.defaultReusePeriod
+        explainedClearing = defaults.bool(forKey: Keys.explainedClearing)
         nameParts = defaults.data(forKey: Keys.nameParts)
             .flatMap { try? JSONDecoder().decode([PadNamePart].self, from: $0) } ?? PadFilename.defaultParts
         copiesPathAfterSaving = defaults.bool(forKey: Keys.copyPathAfterSaving)
@@ -108,8 +115,17 @@ final class PadDraftSettings {
     func namePreview(now: Date) -> String {
         // Read the observed values so the preview follows the counter and its setting.
         _ = (nextNumber, resetsNumberDaily)
-        return (try? PadFilename.name(parts: nameParts, format: format, now: now, number: startingNumber(on: now)))
-            ?? "Invalid filename"
+        return nextName(format: format, now: now) ?? "Invalid filename"
+    }
+
+    /// The name the next generated file would get, without using up its number.
+    func nextName(format: PadFormat, now: Date) -> String? {
+        try? PadFilename.name(parts: nameParts, format: format, now: now, number: startingNumber(on: now))
+    }
+
+    /// Says when a closed draft clears, for Settings and the draft title.
+    var clearingDescription: String {
+        reusePeriod == .alwaysNew ? "each time you open PadPad" : "\(reusePeriod.title) after you close PadPad"
     }
 
     /// The number the next generated name starts from. The counter is shared by every window, so it is read
@@ -135,7 +151,8 @@ final class PadDraftSettings {
         defaults.set(enabledFormats.map(\.rawValue), forKey: Keys.enabledFormats)
         format = .md
         saveAutomatically = false
-        reusePeriod = .fifteenMinutes
+        reusePeriod = Self.defaultReusePeriod
+        explainedClearing = false
         nameParts = PadFilename.defaultParts
         copiesPathAfterSaving = false
         resetsNumberDaily = true

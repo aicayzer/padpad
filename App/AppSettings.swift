@@ -65,8 +65,7 @@ final class AppSettings {
 
         var range: ClosedRange<Double> {
             switch self {
-            case .quickPadWidth: PadWindowSize.minimum.width...PadWindowSize.quickPadMaximumWidth
-            case .fileWindowWidth: PadWindowSize.minimum.width...3000
+            case .quickPadWidth, .fileWindowWidth: PadWindowSize.minimum.width...3000
             case .quickPadHeight, .fileWindowHeight: PadWindowSize.minimum.height...2400
             case .textColumnWidth: 320...3000
             }
@@ -342,7 +341,6 @@ enum PadWindowSize {
     static let quickPad = NSSize(width: 740, height: 480)
     static let fileWindow = NSSize(width: 800, height: 860)
     static let minimum = NSSize(width: 520, height: 320)
-    static let quickPadMaximumWidth: CGFloat = 1_200
 }
 
 /// Presets describe the maximum text column, independent of the window width.

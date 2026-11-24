@@ -641,7 +641,7 @@ struct PadMessageView: View {
     static let maximumWidth: CGFloat = 420
 
     var body: some View {
-        PadMessageWidth(maximum: PadWindowSize.quickPadMaximumWidth) {
+        PadMessageWidth(maximum: Self.maximumWidth) {
             if let dismiss {
                 Button(action: dismiss) {
                     pill {

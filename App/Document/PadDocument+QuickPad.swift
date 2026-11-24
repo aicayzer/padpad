@@ -96,21 +96,27 @@ extension PadDocument {
         guard !isBusy else { return }
         if isVisible {
             close(now: now)
-        } else if isReusable(at: now) || (url != nil && isDirty) {
-            // A saved file with unsaved edits never clears, however long the pad was closed.
-            show()
-            // Show before capturing: an offscreen WebKit view may not answer a snapshot.
-            if url != nil { refreshIfNeeded() }
-        } else if url == nil, !text.isEmpty, !drafts.explainedClearing {
-            // The first draft that would clear is kept, and PadPad explains once how drafts clear.
-            drafts.explainedClearing = true
-            show()
-            present(.draftKept(clearing: drafts.clearingDescription))
-        } else {
-            // The time away has passed. A saved file stays on disk; an unsaved draft clears without a prompt.
-            resetDocument()
-            show()
+            return
         }
+        let explains = clearIfExpired(now: now)
+        show()
+        // Show before capturing: an offscreen WebKit view may not answer a snapshot.
+        if url != nil { refreshIfNeeded() }
+        if explains { present(.draftKept(clearing: drafts.clearingDescription)) }
+    }
+
+    /// Applies the clear time to the hidden quick pad. A saved file stays on disk and a saved file with unsaved
+    /// edits never clears. The first unsaved draft that would clear is kept instead, and the result is true so
+    /// the caller explains, once, how drafts clear.
+    func clearIfExpired(now: Date) -> Bool {
+        if isReusable(at: now) || (url != nil && isDirty) { return false }
+        if url == nil, !text.isEmpty, !drafts.explainedClearing {
+            drafts.explainedClearing = true
+            return true
+        }
+        // Expired drafts deliberately clear without a save prompt.
+        resetDocument()
+        return false
     }
 
     func showCurrent(now: Date = .now) {

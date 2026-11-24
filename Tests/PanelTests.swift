@@ -350,6 +350,7 @@ struct PanelTests {
         let suite = "pad-close-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set("txt", forKey: "pad.format")
+        defaults.setLifecyclePreferences(saveAutomatically: true)
         let alerts = AlertRecorder()
         let document = PadDocument(defaults: defaults, defaultFolder: root, copyPath: { _ in }, presentAlert: alerts.present)
         defer {

@@ -197,22 +197,22 @@ struct SettingsView: View {
     }
 
     private var files: some View {
-        @Bindable var document = document
+        @Bindable var drafts = document.drafts
         return ScrollViewReader { scroll in
             Form {
                 Section {
                     enabledFormats
                         .id("quickPadFormat")
-                    Picker("Default format", selection: $document.format) {
-                        ForEach(document.enabledFormats) { format in
+                    Picker("Default format", selection: $drafts.format) {
+                        ForEach(drafts.enabledFormats) { format in
                             Text("\(format.name) (.\(format.rawValue))").tag(format)
                         }
                     }
                     .tint(.primary)
                     .accessibilityIdentifier("defaultFormat")
-                    Toggle("Save automatically", isOn: $document.saveAutomatically)
+                    Toggle("Save automatically", isOn: $drafts.saveAutomatically)
                         .accessibilityIdentifier("saveAutomatically")
-                    Picker("Clear draft", selection: $document.reusePeriod) {
+                    Picker("Clear draft", selection: $drafts.reusePeriod) {
                         ForEach(PadReuse.allCases) { period in
                             Text(period.title).tag(period)
                         }
@@ -252,11 +252,11 @@ struct SettingsView: View {
                                 .help(document.namePreview)
                                 .accessibilityLabel("Filename example: \(document.namePreview)")
                         }
-                        PadNameField(parts: $document.nameParts).frame(height: 34)
+                        PadNameField(parts: $drafts.nameParts).frame(height: 34)
                     }
-                    Toggle("Restart numbering each day", isOn: $document.resetsNumberDaily)
+                    Toggle("Restart numbering each day", isOn: $drafts.resetsNumberDaily)
                         .accessibilityIdentifier("resetNumberDaily")
-                    Toggle("Copy path after saving", isOn: $document.copiesPathAfterSaving)
+                    Toggle("Copy path after saving", isOn: $drafts.copiesPathAfterSaving)
                         .accessibilityIdentifier("copyPathAfterSaving")
                 } header: { Text("Storage") } footer: {
                     if document.needsFolderSelection {
@@ -274,21 +274,21 @@ struct SettingsView: View {
 
     private var enabledFormats: some View {
         LabeledContent("Enabled formats") {
-            EnabledFormatsPicker(enabledFormats: document.enabledFormats) { format, enabled in
-                document.setFormatEnabled(format, enabled: enabled)
+            EnabledFormatsPicker(enabledFormats: document.drafts.enabledFormats) { format, enabled in
+                document.drafts.setFormatEnabled(format, enabled: enabled)
             }
             .fixedSize()
         }
     }
 
     private var draftExplanation: String {
-        if document.saveAutomatically {
+        if document.drafts.saveAutomatically {
             return "Quick pad saves on close or when switching apps. Save opened files manually."
         }
-        if document.reusePeriod == .alwaysNew {
+        if document.drafts.reusePeriod == .alwaysNew {
             return "Clears temporary drafts on reopening. Saved files are kept."
         }
-        return "Clears temporary drafts after \(document.reusePeriod.title) away. Saved files are kept."
+        return "Clears temporary drafts after \(document.drafts.reusePeriod.title) away. Saved files are kept."
     }
 
     private var about: some View {

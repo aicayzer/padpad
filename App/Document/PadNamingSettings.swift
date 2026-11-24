@@ -1,18 +1,6 @@
 import AppKit
 import SwiftUI
 
-struct PadNamingSettings: View {
-    @Bindable var files: PadDocument
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Default filename")
-            PadNameField(parts: $files.nameParts)
-                .frame(height: 34)
-        }
-    }
-}
-
 struct PadNameField: NSViewRepresentable {
     @Binding var parts: [PadNamePart]
     @Environment(\.isEnabled) private var isEnabled

@@ -84,7 +84,7 @@ struct AppCommands: Commands {
                         .disabled(!canEdit || !editor.canPerformMenuCommands)
                     Divider()
                 }
-                PadMarkdownToolbar(editor: editor).menuCommands
+                PadFormattingCommands(editor: editor)
                     .disabled(!canEdit || !editor.canPerformMenuCommands)
             }
         }

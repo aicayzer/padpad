@@ -305,7 +305,7 @@ private struct MessageFixture {
         let document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false, copyPath: { _ in },
                                    selectOpenFile: selectOpenFile, selectSaveFile: selectSaveFile,
                                    resolveUnsavedChanges: { .cancel }, presentAlert: presentAlert)
-        document.saveAutomatically = false
+        document.drafts.saveAutomatically = false
         return document
     }
 

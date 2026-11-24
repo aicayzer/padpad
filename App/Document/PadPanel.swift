@@ -22,67 +22,51 @@ private struct PadShareAnchorView: NSViewRepresentable {
     }
 }
 
+/// The quick pad: a floating, nonactivating panel. File windows are `PadFileWindow`.
 final class PadPanel: NSPanel, PadDocumentWindow {
     private let files: PadDocument
-    private let quit: @MainActor () -> Void
     private var previousFrame: NSRect?
     private var restoreAfterFullScreen = false
-    private static let maximumWidth: CGFloat = 1_200
     private var trackingWindowMove = false
     private var snapTrackingTimer: Timer?
     private lazy var snapGuide = PadSnapGuide()
-    private let pendingTitleInput = OverlayInputResponder()
-    private let pendingEditorInput = MarkdownInputBuffer()
-    private var editorFocusScheduled = false
+    private lazy var input = PadWindowInput(window: self, files: files)
 
-    var pendingEditorEventCount: Int { pendingEditorInput.eventCount }
+    var pendingEditorEventCount: Int { input.pendingEditorEventCount }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    init(files: PadDocument, quit: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
+    init(files: PadDocument, quit: (@MainActor () -> Void)? = nil) {
         self.files = files
-        self.quit = quit
-        let settings = files.appSettings
-        let width = files.isQuickPad ? settings?.quickPadWidth ?? 740 : settings?.fileWindowWidth ?? 800
-        let height = files.isQuickPad ? settings?.quickPadHeight ?? 480 : settings?.fileWindowHeight ?? 860
-        let mask: NSWindow.StyleMask = files.isQuickPad
-            ? [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel]
-            : [.titled, .closable, .miniaturizable, .resizable]
-        super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                   styleMask: mask,
+        let size = files.defaultWindowSize
+        super.init(contentRect: NSRect(origin: .zero, size: size),
+                   styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered, defer: false)
+        if let quit { input.quit = quit }
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
-        level = files.isQuickPad && files.floating ? .floating : .normal
+        level = files.floating ? .floating : .normal
         isOpaque = false
         backgroundColor = .clear
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         becomesKeyOnlyIfNeeded = false
-        if files.isQuickPad {
-            collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                standardWindowButton(button)?.isHidden = true
-            }
-        } else {
-            collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
+        collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            standardWindowButton(button)?.isHidden = true
         }
         // AppKit draws outside the window; a SwiftUI shadow gets clipped at the hosting bounds.
         hasShadow = true
         isMovableByWindowBackground = true
         contentView = NSHostingView(rootView: PadView(files: files, prepareTitleFocus: { [weak self] in
-            guard let self else { return }
-            pendingTitleInput.discardEvents()
-            makeFirstResponder(pendingTitleInput)
+            self?.input.prepareTitleFocus()
         }).environment(files.appSettings ?? AppSettings())
             // Hosting derives the native minimum from the content's constraints.
-            .frame(minWidth: 520, maxWidth: files.isQuickPad ? Self.maximumWidth : nil, minHeight: 320))
-        maxSize = NSSize(width: files.isQuickPad ? Self.maximumWidth : CGFloat.greatestFiniteMagnitude,
-                         height: CGFloat.greatestFiniteMagnitude)
-        pendingEditorInput.attach(to: self)
-        if files.startsInReadingMode { makeFirstResponder(self) }
-        pendingEditorInput.onInput = { [weak self] in self?.requestEditorFocus() }
+            .frame(minWidth: PadWindowSize.minimum.width, maxWidth: PadWindowSize.quickPadMaximumWidth, minHeight: PadWindowSize.minimum.height))
+        maxSize = NSSize(width: PadWindowSize.quickPadMaximumWidth, height: CGFloat.greatestFiniteMagnitude)
+        input.attach()
+        if files.startsInReadingMode { _ = makeFirstResponder(self) }
         NotificationCenter.default.addObserver(self, selector: #selector(applicationBecameActive),
                                                name: NSApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(windowWillMove),
@@ -92,13 +76,6 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         NotificationCenter.default.addObserver(self, selector: #selector(exitedFullScreen),
                                                name: NSWindow.didExitFullScreenNotification, object: self)
         restoreDefaultSize(animate: false)
-        if !files.isQuickPad, let screen = screen ?? NSScreen.main {
-            let count = max(0, (files.workspace?.documents.count ?? 1) - 1)
-            let offset = CGFloat(count % 6) * 24
-            let point = NSPoint(x: frame.minX + offset, y: frame.maxY - offset)
-            setFrameTopLeftPoint(point)
-            setFrame(constrainFrameRect(frame, to: screen), display: false)
-        }
     }
 
     override func orderOut(_ sender: Any?) {
@@ -107,7 +84,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
     }
 
     @objc private func windowWillMove() {
-        guard files.isQuickPad, !styleMask.contains(.fullScreen),
+        guard !styleMask.contains(.fullScreen),
               files.appSettings?.snapQuickPadToCenter != false,
               NSEvent.pressedMouseButtons & 1 != 0 else { return }
         trackingWindowMove = true
@@ -161,73 +138,16 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         setFrameOrigin(target.origin)
     }
 
-    @objc private func applicationBecameActive() { requestEditorFocus() }
+    @objc private func applicationBecameActive() { input.requestEditorFocus() }
 
-    func requestEditorFocus() {
-        guard !files.onboarding.isPresented else { return }
-        guard !editorFocusScheduled else { return }
-        editorFocusScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.editorFocusScheduled = false
-            guard !self.files.onboarding.isPresented else { return }
-            guard self.isKeyWindow, self.isVisible, !self.files.settingsPresented else { return }
-            guard !self.files.holdInitialReadingFocus() else { return }
-            guard !self.pendingEditorInput.isComposing else { return }
-            guard !self.files.startsInReadingMode || self.firstResponder !== self else { return }
-            let awaitingEditor = self.firstResponder === self.pendingEditorInput || self.firstResponder === self
-            if self.files.currentFormat.usesEditor {
-                guard let editor = self.files.markdownEditor else { return }
-                // Replacing the document can temporarily buffer input while DOM focus catches up.
-                guard awaitingEditor || editor.ownsFirstResponder else { return }
-                editor.enqueueInputs(self.pendingEditorInput.takeInputs())
-                return
-            }
-            guard awaitingEditor, let content = self.contentView,
-                  let editor = self.editor(in: content), editor.isEditable else { return }
-            self.makeFirstResponder(editor)
-        }
-    }
-
-    func prepareMarkdownSnapshot() {
-        guard files.currentFormat.usesEditor, let editor = files.markdownEditor else { return }
-        editor.hasExternalMarkedText = { [weak self] in self?.pendingEditorInput.isComposing == true }
-        guard !pendingEditorInput.isComposing, pendingEditorInput.eventCount > 0 else { return }
-        editor.enqueueInputs(pendingEditorInput.takeInputs())
-    }
-
-    func prepareReading() {
-        pendingTitleInput.discardEvents()
-        pendingEditorInput.discardEvents()
-        makeFirstResponder(self)
-    }
-
-    func prepareOnboarding() {
-        pendingTitleInput.discardEvents()
-        pendingEditorInput.discardEvents()
-        makeFirstResponder(nil)
-    }
-
-    func resumeEditor() {
-        guard !files.onboarding.isPresented else { return }
-        pendingEditorInput.attach(to: self)
-        makeFirstResponder(pendingEditorInput)
-        files.isActive = true
-        requestEditorFocus()
-    }
-
-    private func editor(in view: NSView) -> NSTextView? {
-        if let editor = view as? NSTextView, !(editor is MarkdownInputBuffer), !editor.isFieldEditor { return editor }
-        for child in view.subviews {
-            if let editor = editor(in: child) { return editor }
-        }
-        return nil
-    }
+    func requestEditorFocus() { input.requestEditorFocus() }
+    func prepareMarkdownSnapshot() { input.prepareMarkdownSnapshot() }
+    func prepareReading() { input.prepareReading() }
+    func prepareOnboarding() { input.prepareOnboarding() }
+    func resumeEditor() { input.resumeEditor() }
 
     override func sendEvent(_ event: NSEvent) {
-        if handleOnboardingNavigation(event) { return }
-        if !files.onboarding.isPresented, files.currentFormat.usesEditor, firstResponder !== pendingEditorInput,
-           files.markdownEditor?.capturePendingInput(event) == true { return }
+        if handleOnboardingNavigation(event) || input.capturesPendingInput(event) { return }
         super.sendEvent(event)
         files.acceptMarkdownContentClick(event)
     }
@@ -274,40 +194,11 @@ final class PadPanel: NSPanel, PadDocumentWindow {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard files.workspace?.isTransitioning != true else { return true }
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if let action = files.editingShortcuts.action(for: event) {
-            guard !files.onboarding.isPresented else { return true }
-            switch action {
-            case .newFile: (files.workspace?.quickPad ?? files).commandNew()
-            case .open: Task { await files.openPicker() }
-            case .save: files.save()
-            case .saveAs: Task { await files.saveAs() }
-            case .restoreDefaultSize: restoreDefaultSize()
-            case .copyAllContents: Task { await files.copyAllContents() }
-            case .copyPath: files.copyFilePath()
-            }
-            return true
-        }
-        if modifiers == .command {
-            switch event.charactersIgnoringModifiers {
-            case "w": files.close()
-            case "r": files.requestRename()
-            case ",":
-                files.settingsPresented = true
-                files.showSettings()
-            case "q": quit()
-            default: return super.performKeyEquivalent(with: event)
-            }
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
+        input.performKeyEquivalent(with: event, restoreDefaultSize: { restoreDefaultSize() })
+            ?? super.performKeyEquivalent(with: event)
     }
 
-    override func cancelOperation(_ sender: Any?) {
-        if files.isQuickPad { files.close() }
-        else { super.cancelOperation(sender) }
-    }
+    override func cancelOperation(_ sender: Any?) { files.close() }
 
     override func close() { files.close() }
 
@@ -316,9 +207,6 @@ final class PadPanel: NSPanel, PadDocumentWindow {
     }
 
     func restoreDefaultSize(animate: Bool = true) {
-        let settings = files.appSettings
-        let width = files.isQuickPad ? settings?.quickPadWidth ?? 740 : settings?.fileWindowWidth ?? 800
-        let height = files.isQuickPad ? settings?.quickPadHeight ?? 480 : settings?.fileWindowHeight ?? 860
         guard let screen = screen ?? NSScreen.main else { return }
         if styleMask.contains(.fullScreen) {
             restoreAfterFullScreen = true
@@ -326,14 +214,11 @@ final class PadPanel: NSPanel, PadDocumentWindow {
             return
         }
         let visible = screen.visibleFrame.insetBy(dx: 12, dy: 12)
-        let size = NSSize(width: min(width, visible.width), height: min(height, visible.height))
+        let preferred = files.defaultWindowSize
+        let size = NSSize(width: min(preferred.width, visible.width), height: min(preferred.height, visible.height))
         previousFrame = nil
         setFrame(NSRect(origin: frame.origin, size: size), display: true, animate: animate)
-        if files.isQuickPad {
-            setFrameOrigin(PadQuickPadPlacement.frame(size: size, in: screen.visibleFrame).origin)
-        } else {
-            center()
-        }
+        setFrameOrigin(PadQuickPadPlacement.frame(size: size, in: screen.visibleFrame).origin)
         setFrame(constrainFrameRect(frame, to: screen), display: true)
     }
 
@@ -355,14 +240,13 @@ final class PadPanel: NSPanel, PadDocumentWindow {
     }
 
     func toggleExpanded() {
-        if !files.isQuickPad { zoom(nil); return }
         if let previousFrame {
             setFrame(previousFrame, display: true, animate: true)
             self.previousFrame = nil
         } else if let screen = screen ?? NSScreen.main {
             previousFrame = frame
             var expanded = screen.visibleFrame.insetBy(dx: 24, dy: 24)
-            expanded.size.width = min(expanded.width, Self.maximumWidth)
+            expanded.size.width = min(expanded.width, PadWindowSize.quickPadMaximumWidth)
             expanded.origin.x = screen.visibleFrame.midX - expanded.width / 2
             setFrame(expanded, display: true, animate: true)
         }
@@ -370,55 +254,22 @@ final class PadPanel: NSPanel, PadDocumentWindow {
 
     override func becomeKey() {
         super.becomeKey()
-        files.markdownEditor?.keyboardFocusDidChange()
-        files.workspace?.didFocus(files)
-        files.refreshIfNeeded()
-        files.settingsPresented = false
-        guard !files.onboarding.isPresented else {
-            files.isActive = false
-            return
-        }
-        if !files.startsInReadingMode, !(firstResponder is NSTextView), files.markdownEditor?.ownsFirstResponder != true {
-            pendingEditorInput.attach(to: self)
-            makeFirstResponder(pendingEditorInput)
-        }
-        files.isActive = true
-        requestEditorFocus()
+        input.didBecomeKey()
     }
 
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
         let result = super.makeFirstResponder(responder)
-        if result { files.markdownEditor?.keyboardFocusDidChange() }
-        if result, let editor = responder as? NSTextView,
-           !(editor is MarkdownInputBuffer), !editor.isFieldEditor {
-            // SwiftUI must finish mounting the editor and its binding before replaying input.
-            DispatchQueue.main.async { [weak self, weak editor] in
-                guard let self, let editor, self.isKeyWindow, self.firstResponder === editor else { return }
-                for input in self.pendingEditorInput.takeInputs() {
-                    guard self.isKeyWindow, self.firstResponder === editor else { break }
-                    switch input {
-                    case .text(let text): editor.insertText(text, replacementRange: editor.selectedRange())
-                    case .key(let event): self.sendEvent(event)
-                    }
-                }
-            }
-        }
+        if result { input.didMakeFirstResponder(responder) }
         return result
     }
 
     override func resignKey() {
         super.resignKey()
-        files.markdownEditor?.keyboardFocusDidChange()
-        pendingTitleInput.discardEvents()
-        files.isActive = false
-        files.lostFocus()
+        input.didResignKey()
     }
-
 }
 
 struct PadView: View {
-    // Retained for a future return to inline formatting controls.
-    private static let usesCenteredFormattingToolbar = false
     @Environment(AppSettings.self) private var settings
     @Environment(\.openSettings) private var openSettings
     @Bindable var files: PadDocument
@@ -428,7 +279,6 @@ struct PadView: View {
     @State private var renamedDocument: UUID?
     @FocusState private var editing: Bool
     @State private var shareAnchor = PadShareAnchor()
-    @State private var showingFormatting = false
     @State private var shortcut = KeyboardShortcuts.getShortcut(for: .pad)
 
     // The editor sits inside seven points of window padding on each side.
@@ -465,108 +315,80 @@ struct PadView: View {
         }
         .onChange(of: files.renameRequest) { _, _ in beginRename() }
         .onChange(of: files.onboarding.isPresented) { _, presented in
-            if presented { editing = false; renaming = false; showingFormatting = false }
+            if presented { editing = false; renaming = false }
         }
     }
 
     private var editorLayout: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
-                let centerWidth: CGFloat = Self.usesCenteredFormattingToolbar && showingFormatting && files.currentFormat.usesEditor
-                    ? (geometry.size.width >= 820 ? 280 : geometry.size.width >= 700 ? 144 : 36) : 0
-                let titleSpace = Self.usesCenteredFormattingToolbar && showingFormatting
-                    ? max(40, (geometry.size.width - centerWidth) / 2 - 100)
-                    : max(40, geometry.size.width - 216)
-                ZStack {
-                    HStack(spacing: 6) {
-                        Button { files.close() } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 14, height: 14)
-                                .frame(width: 22, height: 26)
-                        }
-                        .padding(.trailing, -2)
-                        .accessibilityLabel(files.isQuickPad ? "Close PadPad" : "Close file")
-                        HStack(spacing: 5) {
-                            if renaming {
-                                HStack(spacing: 2) {
-                                    OverlaySearchField(placeholder: "Name", text: $titleDraft, fontSize: 14,
-                                                       fontWeight: .semibold, selectsTextOnFocus: true,
-                                                       isCurrent: { renaming && files.isActive && renamedDocument == files.documentID },
-                                                       submit: { commitRename() },
-                                                       dismiss: { finishRename() },
-                                                       blur: { commitRename(refocus: false) })
-                                        .frame(width: titleSpace)
-                                }
-                                .frame(height: 22)
-                            } else {
-                                Text(files.displayName)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .accessibilityIdentifier("documentTitle")
-                                    .help("Rename (⌘R or double-click)")
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .onTapGesture(count: 2, perform: beginRename)
-                                    .simultaneousGesture(WindowDragGesture())
+                let titleSpace = max(40, geometry.size.width - 216)
+                HStack(spacing: 6) {
+                    Button { files.close() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                            .frame(width: 22, height: 26)
+                    }
+                    .padding(.trailing, -2)
+                    .accessibilityLabel(files.isQuickPad ? "Close PadPad" : "Close file")
+                    HStack(spacing: 5) {
+                        if renaming {
+                            HStack(spacing: 2) {
+                                OverlaySearchField(placeholder: "Name", text: $titleDraft, fontSize: 14,
+                                                   fontWeight: .semibold, selectsTextOnFocus: true,
+                                                   isCurrent: { renaming && files.isActive && renamedDocument == files.documentID },
+                                                   submit: { commitRename() },
+                                                   dismiss: { finishRename() },
+                                                   blur: { commitRename(refocus: false) })
+                                    .frame(width: titleSpace)
                             }
+                            .frame(height: 22)
+                        } else {
+                            Text(files.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .accessibilityIdentifier("documentTitle")
+                                .help("Rename (⌘R or double-click)")
+                                .fixedSize(horizontal: false, vertical: true)
+                                .onTapGesture(count: 2, perform: beginRename)
+                                .simultaneousGesture(WindowDragGesture())
                         }
-                        .frame(maxWidth: titleSpace + 12, alignment: .leading)
-                        Spacer(minLength: 0)
-                        HStack(spacing: 2) {
-                            if files.currentFormat.usesEditor, let editor = files.markdownEditor {
-                                Group {
-                                    if Self.usesCenteredFormattingToolbar {
-                                        Button {
-                                            showingFormatting.toggle()
-                                            editor.focus()
-                                        } label: {
-                                            Image(systemName: "textformat").frame(width: 16)
-                                        }
-                                        .buttonStyle(PadToolbarButtonStyle(selected: showingFormatting))
-                                        .accessibilityLabel("Formatting")
-                                        .accessibilityIdentifier("formattingToggle")
-                                        .accessibilityValue(showingFormatting ? "Shown" : "Hidden")
-                                        .accessibilityAddTraits(showingFormatting ? .isSelected : [])
-                                        .help(showingFormatting ? "Hide formatting" : "Show formatting")
-                                        .disabled(!editor.isReady)
-                                    } else {
-                                        Menu {
-                                            PadMarkdownToolbar(editor: editor).menuCommands
-                                                .disabled(!editor.canPerformMenuCommands)
-                                        } label: {
-                                            Image(systemName: "textformat").frame(width: 16)
-                                        }
-                                        .menuStyle(.button)
-                                        .menuIndicator(.hidden)
-                                        .buttonStyle(PadToolbarButtonStyle())
-                                        .accessibilityLabel("Formatting")
-                                        .accessibilityIdentifier("formattingMenu")
-                                        .help("Formatting")
-                                        .disabled(!editor.isReady)
-                                    }
-                                }
+                    }
+                    .frame(maxWidth: titleSpace + 12, alignment: .leading)
+                    Spacer(minLength: 0)
+                    HStack(spacing: 2) {
+                        if files.currentFormat.usesEditor, let editor = files.markdownEditor {
+                            Menu {
+                                PadFormattingCommands(editor: editor)
+                                    .disabled(!editor.canPerformMenuCommands)
+                            } label: {
+                                Image(systemName: "textformat").frame(width: 16)
                             }
-                            actionIcon("square.and.arrow.up", label: "Share", verticalOffset: -1) {
-                                files.share(from: shareAnchor.view)
-                            }
-                            .background(PadShareAnchorView(anchor: shareAnchor).allowsHitTesting(false))
-                            .disabled(!files.canShare)
+                            .menuStyle(.button)
+                            .menuIndicator(.hidden)
+                            .buttonStyle(PadToolbarButtonStyle())
+                            .accessibilityLabel("Formatting")
+                            .accessibilityIdentifier("formattingMenu")
+                            .help("Formatting")
+                            .disabled(!editor.isReady)
                         }
+                        actionIcon("square.and.arrow.up", label: "Share", verticalOffset: -1) {
+                            files.share(from: shareAnchor.view)
+                        }
+                        .background(PadShareAnchorView(anchor: shareAnchor).allowsHitTesting(false))
+                        .disabled(!files.canShare)
+                    }
+                    .fixedSize()
+                    Button("Save") { files.save() }
+                        .buttonStyle(PadToolbarButtonStyle(primary: true))
+                        .disabled(!files.isDirty)
                         .fixedSize()
-                        Button("Save") { files.save() }
-                            .buttonStyle(PadToolbarButtonStyle(primary: true))
-                            .disabled(!files.isDirty)
-                            .fixedSize()
-                    }
-                    .padding(.leading, 8)
-                    .padding(.trailing, 10)
-                    if Self.usesCenteredFormattingToolbar, showingFormatting, files.currentFormat.usesEditor, let editor = files.markdownEditor {
-                        PadMarkdownToolbar(editor: editor)
-                            .frame(width: centerWidth)
-                    }
                 }
+                .padding(.leading, 8)
+                .padding(.trailing, 10)
                 .frame(width: geometry.size.width, height: 38)
             }
             .frame(height: 38)
@@ -679,7 +501,6 @@ struct PadView: View {
             if files.startsInReadingMode { editing = false }
             finishRename(refocus: false)
         }
-        .onChange(of: files.currentFormat) { showingFormatting = false }
         .onChange(of: files.isActive, initial: true) {
             if files.isActive {
                 if !renaming, !files.startsInReadingMode { editing = true }
@@ -755,13 +576,12 @@ private struct PadFormatButtonStyle: ButtonStyle {
 private struct PadToolbarButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     var primary = false
-    var selected = false
     @State private var hovered = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(isEnabled && (primary || selected) ? .primary : .secondary)
+            .foregroundStyle(isEnabled && primary ? .primary : .secondary)
             .frame(height: 16)
             .padding(.horizontal, primary ? 14 : 8)
             .padding(.vertical, 4)

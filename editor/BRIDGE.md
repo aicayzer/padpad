@@ -40,7 +40,7 @@ Print first captures current source, then awaits the scoped `printableSnapshot`,
 
 ## Local diagnostics
 
-Diagnostics are off by default. The native General settings preference calls `setDiagnosticsEnabled(boolean)` for every mounted editor. Disabling it clears engine listeners and history, native history, and the retained local report. Native TXT editing records only activity categories and counts.
+Diagnostics are off by default. The Record diagnostic activity setting, in About, calls `setDiagnosticsEnabled(boolean)` for every mounted editor. Disabling it clears engine listeners and history, native history, and the retained local report. Native TXT editing records only activity categories and counts.
 
 `diagnosticReport()` reads metadata independently of document snapshots, including during composition, pending work, or a refused edit. The native side validates schema version 1 and copies only known enums, booleans, bounded numbers, safe presentation fields, and random diagnostic IDs. It never exports source, filenames, paths, document IDs, input characters, link destinations, or arbitrary error messages. Refusals retain the structured error code and safe preservation reason.
 

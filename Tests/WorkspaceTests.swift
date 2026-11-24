@@ -74,8 +74,9 @@ import Testing
         let original = try fixture.file("note.txt", text: "Plain text")
         fixture.workspace.open(original)
         let document = try #require(fixture.workspace.documents.first)
-        #expect(fixture.workspace.quickPad.saveAutomatically)
-        #expect(!document.saveAutomatically)
+        #expect(fixture.workspace.quickPad.drafts.saveAutomatically)
+        // File windows share the Files settings; FormatSwitchTests check they never save automatically.
+        #expect(document.drafts === fixture.workspace.quickPad.drafts)
         await document.changeFormat(to: .md)
         #expect(document.currentFormat == .txt)
         #expect(document.url == original)

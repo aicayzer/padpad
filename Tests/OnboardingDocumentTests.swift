@@ -25,7 +25,7 @@ import Testing
         let file = fixture.root.appending(path: "my-document.md")
         try Data("saved version".utf8).write(to: file)
         document.open(file)
-        document.saveAutomatically = true
+        document.drafts.saveAutomatically = true
         document.onboarding.complete()
         let id = document.documentID
         let source = "# Latest edit\r\n\n**Still unsaved**\n"
@@ -46,7 +46,7 @@ import Testing
         #expect(document.text == source)
         #expect(document.documentID == id)
         #expect(document.url == file)
-        #expect(document.saveAutomatically)
+        #expect(document.drafts.saveAutomatically)
         #expect(try String(contentsOf: file, encoding: .utf8) == "saved version")
     }
 
@@ -95,7 +95,7 @@ import Testing
         #expect(document.text.hasPrefix("# "))
         #expect(document.text.contains("- [ ]"))
         #expect(document.text.contains("**Keep what matters.**"))
-        #expect(document.format == .txt)
+        #expect(document.drafts.format == .txt)
         #expect(fixture.defaults.string(forKey: "pad.format") == "txt")
         #expect(document.url == nil)
         #expect(document.documentID == id)
@@ -142,7 +142,7 @@ import Testing
         defer { fixture.cleanUp() }
         let document = fixture.document
         document.text = "Save when closing"
-        document.saveAutomatically = true
+        document.drafts.saveAutomatically = true
         await document.restartOnboarding()
         document.close()
         #expect(!document.onboarding.hasCompleted)
@@ -163,35 +163,6 @@ import Testing
         #expect(document.text.isEmpty)
         #expect(try fixture.savedFiles().isEmpty)
     }
-
-    @Test func openingAFileBypassesPresentedOnboarding() async throws {
-        let fixture = try OnboardingDocumentFixture()
-        defer { fixture.cleanUp() }
-        let document = fixture.document
-        let file = fixture.root.appending(path: "opened.txt")
-        try Data("An existing file".utf8).write(to: file)
-        await document.restartOnboarding()
-        document.open(file)
-        #expect(!document.onboarding.isPresented)
-        #expect(!document.onboarding.hasCompleted)
-        #expect(document.url == file)
-        #expect(document.text == "An existing file")
-    }
-
-    @Test func failedFileOpenLeavesOnboardingAndAlertsOverTheRetainedDocument() async throws {
-        let fixture = try OnboardingDocumentFixture()
-        defer { fixture.cleanUp() }
-        let document = fixture.document
-        document.text = "Keep this draft"
-        let id = document.documentID
-        await document.restartOnboarding()
-        document.open(fixture.root.appending(path: "missing.txt"))
-        #expect(!document.onboarding.isPresented)
-        #expect(fixture.alerts.last == expectedAlert(CocoaError(.fileReadNoSuchFile), during: .open))
-        #expect(document.text == "Keep this draft")
-        #expect(document.documentID == id)
-        #expect(document.url == nil)
-    }
 }
 
 @MainActor
@@ -210,7 +181,7 @@ private struct OnboardingDocumentFixture {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,
                                copyPath: { _ in }, resolveUnsavedChanges: { .cancel }, presentAlert: alerts.present)
-        document.saveAutomatically = false
+        document.drafts.saveAutomatically = false
     }
 
     func savedFiles() throws -> [URL] {

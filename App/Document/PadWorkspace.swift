@@ -53,7 +53,7 @@ final class PadWorkspace {
             return
         }
         let document = PadDocument(defaults: defaults, defaultFolder: quickPad.folder,
-                                   presentsWindow: presentsWindows, role: .file,
+                                   presentsWindow: presentsWindows, role: .file, drafts: quickPad.drafts,
                                    editingShortcuts: quickPad.editingShortcuts, presentAlert: presentAlert)
         document.appSettings = settings
         document.workspace = self

@@ -82,22 +82,3 @@ Workflow `CI` runs on pull requests, not on pushes to `main`. A superseded run i
 A failing lane uploads its logs and `.xcresult` bundles for seven days. Passing runs upload nothing.
 
 Public pull requests use hosted CI. Do not attach personal persistent runners. Required CI must pass before merging; native interaction checks are also needed for changes to focus, save, rename, close, or window behavior.
-
-### CI runtime
-
-Before the lane split (30 October 2026), one `App` job ran everything:
-
-| | Before |
-| --- | --- |
-| Per pull request | About 37 min |
-| After merge | The same job again on `main`, about 35 min |
-| UI tests | 27 min for about 40 tests and 48 app launches |
-| Unit tests | 183 cases in 3 s |
-
-After the lane split:
-
-| | After |
-| --- | --- |
-| Per pull request | About 12 min wall time: App about 3 min, and the three UI shards about 11 to 12 min in parallel |
-| Documentation-only pull request | No build runs |
-| After merge | No second run on `main` |

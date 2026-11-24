@@ -81,7 +81,7 @@ struct PanelTests {
         document.newFile()
         document.text = "Retain this draft"
         document.close()
-        document.format = .md
+        document.drafts.format = .md
         var snapshots = 0
         document.editorSnapshot = { snapshots += 1; return "Retain this draft" }
         document.handleGlobalShortcut()
@@ -226,7 +226,7 @@ struct PanelTests {
         defer {
             document.showSettings = {}
             document.settingsPresented = false
-            document.saveAutomatically = false
+            document.drafts.saveAutomatically = false
             document.text = document.savedText
             settingsWindow.orderOut(nil)
             settingsWindow.contentView = nil
@@ -257,7 +257,7 @@ struct PanelTests {
         let originalID = document.documentID
 
         // A scratch document must survive opening Settings even when automatic saving is off.
-        document.saveAutomatically = false
+        document.drafts.saveAutomatically = false
         settingsWindow.contentView = NSHostingView(rootView: SettingsView().environment(settings).environment(document).environment(workspace))
         document.showSettings = {
             settingsWindow.makeKeyAndOrderFront(nil)
@@ -284,7 +284,7 @@ struct PanelTests {
         returnedEditor.insertText("\nStill here after Settings.", replacementRange: NSRange(location: returnedEditor.string.utf16.count, length: 0))
         try await eventually("text input after settings") { document.text.hasSuffix("Still here after Settings.") }
 
-        document.saveAutomatically = true
+        document.drafts.saveAutomatically = true
         document.save()
         #expect(document.notice != nil)
         let scrollView = try #require(returnedEditor.enclosingScrollView)
@@ -326,7 +326,7 @@ struct PanelTests {
         let alerts = AlertRecorder()
         let document = PadDocument(defaults: defaults, defaultFolder: root, copyPath: { _ in }, presentAlert: alerts.present)
         defer {
-            document.saveAutomatically = false
+            document.drafts.saveAutomatically = false
             document.text = document.savedText
             document.close()
             defaults.removePersistentDomain(forName: suite)

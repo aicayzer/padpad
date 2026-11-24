@@ -127,7 +127,7 @@ import Testing
             ], forName: UserDefaults.argumentDomain)
             let document = PadDocument(defaults: defaults, presentsWindow: false)
             let settings = AppSettings(defaults: defaults)
-            #expect(document.saveAutomatically == expected)
+            #expect(document.drafts.saveAutomatically == expected)
             #expect(document.floating == expected)
             #expect(settings.showInDock == expected)
             #expect(settings.menuBarItem == expected)
@@ -138,18 +138,18 @@ import Testing
     @Test func defaultsAndPreferencesPersist() throws {
         let (files, root, defaults, _) = try fixture(format: nil)
         defer { try? FileManager.default.removeItem(at: root) }
-        #expect(files.format == .md)
-        #expect(files.saveAutomatically)
-        #expect(files.reusePeriod == .fifteenMinutes)
-        files.format = .txt
-        files.saveAutomatically = false
-        files.reusePeriod = .fiveMinutes
+        #expect(files.drafts.format == .md)
+        #expect(files.drafts.saveAutomatically)
+        #expect(files.drafts.reusePeriod == .fifteenMinutes)
+        files.drafts.format = .txt
+        files.drafts.saveAutomatically = false
+        files.drafts.reusePeriod = .fiveMinutes
         #expect(defaults.string(forKey: "pad.format") == "txt")
         #expect(defaults.bool(forKey: "pad.saveAutomatically") == false)
         #expect(defaults.integer(forKey: "pad.reusePeriod") == 5)
         let (restored, restoredRoot, _, _) = try fixture(defaults: defaults)
         defer { try? FileManager.default.removeItem(at: restoredRoot) }
-        #expect(restored.format == .txt)
+        #expect(restored.drafts.format == .txt)
         #expect(restored.currentFormat == .txt)
     }
 
@@ -163,7 +163,7 @@ import Testing
         let second = try PadFilename.available(in: root, parts: PadFilename.defaultParts,
                                                   format: .md, now: now, number: 1).url
         #expect(second.lastPathComponent.hasSuffix("-002.md"))
-        files.format = .md
+        files.drafts.format = .md
         files.newFile()
         files.text = "# Direct file\n"
         files.save()
@@ -176,13 +176,13 @@ import Testing
     @Test func savingCopiesThePathOnlyWhenTheSettingIsOn() throws {
         let (files, root, defaults, copiedPath) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        #expect(!files.copiesPathAfterSaving)
+        #expect(!files.drafts.copiesPathAfterSaving)
         files.text = "first"
         files.save()
         #expect(files.notice == "Saved")
         #expect(files.noticeRevealsFile)
         #expect(copiedPath() == nil)
-        files.copiesPathAfterSaving = true
+        files.drafts.copiesPathAfterSaving = true
         #expect(defaults.bool(forKey: "pad.copyPathAfterSaving"))
         files.newFile()
         files.text = "second"
@@ -196,8 +196,8 @@ import Testing
         #expect(files.notice == "Saved")
         #expect(copiedPath() == firstCopy)
         files.resetQuickPadPreferences()
-        #expect(!files.copiesPathAfterSaving)
-        #expect(files.resetsNumberDaily)
+        #expect(!files.drafts.copiesPathAfterSaving)
+        #expect(files.drafts.resetsNumberDaily)
     }
 
     @Test func copyPathCopiesAFileAndSavesADraftFirst() throws {
@@ -240,10 +240,10 @@ import Testing
     @Test func numberingRestartsEachDayUnlessTurnedOff() throws {
         let (files, root, defaults, _) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        files.nameParts = [.literal("Note-"), .token(.number)]
+        files.drafts.nameParts = [.literal("Note-"), .token(.number)]
         var day = Date(timeIntervalSince1970: 1_790_113_017)
         files.currentDate = { day }
-        #expect(files.resetsNumberDaily)
+        #expect(files.drafts.resetsNumberDaily)
         // A counter left over from before daily numbering restarts too.
         defaults.set(35, forKey: "pad.nextNumber")
         #expect(files.namePreview == "Note-001.txt")
@@ -261,13 +261,13 @@ import Testing
         files.save()
         // The next day starts again at 1, and skips the name already taken.
         #expect(files.displayName == "Note-003.txt")
-        files.nameParts = [.literal("Day-"), .token(.number)]
+        files.drafts.nameParts = [.literal("Day-"), .token(.number)]
         day = day.addingTimeInterval(86_400)
         files.newFile()
         files.text = "four"
         files.save()
         #expect(files.displayName == "Day-001.txt")
-        files.resetsNumberDaily = false
+        files.drafts.resetsNumberDaily = false
         #expect(defaults.object(forKey: "pad.resetNumberDaily") as? Bool == false)
         day = day.addingTimeInterval(86_400)
         files.newFile()
@@ -307,7 +307,7 @@ import Testing
             }
         })
         defer { try? FileManager.default.removeItem(at: root) }
-        files.saveAutomatically = false
+        files.drafts.saveAutomatically = false
         files.newFile()
         #expect(files.rename(to: "Retained thought"))
         files.text = "Keep this unsaved scratch text"
@@ -352,8 +352,8 @@ import Testing
             return .cancel
         })
         defer { try? FileManager.default.removeItem(at: root) }
-        files.saveAutomatically = false
-        files.reusePeriod = .fiveMinutes
+        files.drafts.saveAutomatically = false
+        files.drafts.reusePeriod = .fiveMinutes
         let now = Date.now
         files.newFile(now: now)
         files.text = "Temporary writing"
@@ -434,7 +434,7 @@ import Testing
         #expect(files.text.isEmpty)
         #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).count == 1)
 
-        files.saveAutomatically = false
+        files.drafts.saveAutomatically = false
         files.text = "scratch"
         files.close()
         #expect(files.text == "scratch")
@@ -516,7 +516,7 @@ import Testing
             return decision.discard ? .discard : .cancel
         })
         defer { try? FileManager.default.removeItem(at: root) }
-        files.saveAutomatically = false
+        files.drafts.saveAutomatically = false
         files.newFile()
         files.text = "saved scratch"
         files.save()
@@ -546,8 +546,8 @@ import Testing
             return .cancel
         }, alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
-        files.saveAutomatically = false
-        files.reusePeriod = .alwaysNew
+        files.drafts.saveAutomatically = false
+        files.drafts.reusePeriod = .alwaysNew
         let start = Date.now
         if opened {
             let source = root.appending(path: "opened.\(format.rawValue)")
@@ -582,7 +582,7 @@ import Testing
         let alerts = AlertRecorder()
         let (files, root, _, _) = try fixture(resolveUnsavedChanges: { .save }, alerts: alerts)
         defer { try? FileManager.default.removeItem(at: root) }
-        files.saveAutomatically = false
+        files.drafts.saveAutomatically = false
         files.text = "original"
         files.save()
         let saved = try #require(files.url)
@@ -717,7 +717,7 @@ import Testing
         })
         decision.current = files
         defer { try? FileManager.default.removeItem(at: root) }
-        files.saveAutomatically = false
+        files.drafts.saveAutomatically = false
         files.text = "saved"
         files.save()
         let saved = try #require(files.url)
@@ -751,7 +751,7 @@ import Testing
     @Test(.opensWindows) func nonactivatingPanelRoutesCommandNewDirectly() throws {
         let (files, root, _, _) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        files.reusePeriod = .alwaysNew
+        files.drafts.reusePeriod = .alwaysNew
         files.newFile()
         files.text = "previous"
         let panel = PadPanel(files: files)
@@ -841,17 +841,17 @@ import Testing
         files.save()
         #expect(files.displayName.hasSuffix("-002.txt"))
         #expect(defaults.integer(forKey: "pad.nextNumber") == 3)
-        files.nameParts = [.literal("Note "), .token(.number)]
+        files.drafts.nameParts = [.literal("Note "), .token(.number)]
         let (reopened, otherRoot, _, _) = try fixture(defaults: defaults)
         defer { try? FileManager.default.removeItem(at: otherRoot) }
-        #expect(reopened.nameParts == files.nameParts)
+        #expect(reopened.drafts.nameParts == files.drafts.nameParts)
         #expect(reopened.namePreview == "Note 003.txt")
     }
 
     @Test func generatedNamesSkipCollisionsWithoutReplacingFiles() throws {
         let (files, root, defaults, _) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        files.nameParts = [.literal("Note-"), .token(.number)]
+        files.drafts.nameParts = [.literal("Note-"), .token(.number)]
         let first = root.appending(path: "Note-001.txt")
         try Data("keep".utf8).write(to: first)
         files.text = "new"
@@ -859,7 +859,7 @@ import Testing
         #expect(files.displayName == "Note-002.txt")
         #expect(defaults.integer(forKey: "pad.nextNumber") == 3)
         #expect(try String(contentsOf: first, encoding: .utf8) == "keep")
-        files.nameParts = [.literal("Plain")]
+        files.drafts.nameParts = [.literal("Plain")]
         files.newFile()
         files.text = "third"
         files.save()
@@ -876,7 +876,7 @@ import Testing
             directory.appending(path: name)
         })
         defer { try? FileManager.default.removeItem(at: root) }
-        files.nameParts = [.literal("Note-"), .token(.number)]
+        files.drafts.nameParts = [.literal("Note-"), .token(.number)]
         let existing = root.appending(path: "Note-001.txt")
         try Data("keep existing".utf8).write(to: existing)
         files.text = "new"
@@ -940,7 +940,7 @@ import Testing
             return nil
         })
         defer { try? FileManager.default.removeItem(at: root) }
-        files.nameParts = [.literal("../invalid")]
+        files.drafts.nameParts = [.literal("../invalid")]
         files.text = "keep this"
         await files.saveAs()
         #expect(files.error == PadError.invalidName.message(during: .nameFormat))
@@ -954,13 +954,13 @@ import Testing
         let (files, root, defaults, _) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         files.text = "keep this"
-        files.nameParts = [.literal("../unsafe")]
+        files.drafts.nameParts = [.literal("../unsafe")]
         #expect(files.namePreview == "Invalid filename")
         files.save()
         #expect(files.url == nil)
         #expect(files.error == PadError.invalidName.message(during: .nameFormat))
         #expect(defaults.integer(forKey: "pad.nextNumber") == 0)
-        files.nameParts = PadFilename.defaultParts
+        files.drafts.nameParts = PadFilename.defaultParts
         try FileManager.default.removeItem(at: root)
         files.save()
         #expect(files.url == nil)
@@ -974,7 +974,7 @@ import Testing
     @Test func scratchRenameKeepsExtensionAndDoesNotConsumeGeneratedNumber() throws {
         let (files, root, defaults, _) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        files.format = .md
+        files.drafts.format = .md
         files.newFile()
         #expect(files.displayName == "Untitled")
         #expect(files.editableName == "Untitled")

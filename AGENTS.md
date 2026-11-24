@@ -20,7 +20,6 @@ Commands, tests and CI are in [DEVELOPMENT.md](DEVELOPMENT.md); distribution is 
 - The right header orders Share, Aa and Save. Window and file actions stay in the native menus.
 - Formatting controls use neutral adaptive foreground colors, not the accent color.
 - Formatting shortcuts work independently of the menu. The editor keymap is in `PadMarkdownEditorController.keymap`, and window shortcuts may not use its keys. Restore Default Size and Copy All Contents use configurable local shortcut recorders.
-- The centered formatting toolbar stays behind the disabled `usesCenteredFormattingToolbar` switch in `App/Document/PadPanel.swift` for possible future use.
 
 ### Scratch text
 
@@ -68,7 +67,7 @@ Scratch text is intentionally temporary, because the quick pad is a scratch surf
 
 ## Architecture
 
-- `App/Document/` owns document state, persistence, naming, format conversion and the native editor panel. `App/Editor/` owns the offline InkKit bridge (Markdown and RTF) and focus helpers.
+- `App/Document/` owns document state, persistence, naming, format conversion and the windows. `PadDocument` keeps its state in `PadDocument.swift`, with one extension file per concern: editor bridge, quick-pad lifecycle, format switching, and files. `PadDraftSettings` holds the Files settings, shared by every document. `PadWindowInput` holds the keyboard and focus handling both window types share. `App/Editor/` owns the offline InkKit bridge (Markdown and RTF) and focus helpers.
 - `editor/` is a thin host bootstrap for `@aicayzer/inkkit`, bundled offline. [editor/BRIDGE.md](editor/BRIDGE.md) defines the bridge protocol. InkKit owns Markdown preservation, tables, clipboard conversion and optional managed images, so a shared-engine fix and its regression test belong in the InkKit repository. Tests here check the package facade.
 - The app delegate owns the lifecycle through `PadWorkspace`, which retains the quick pad and the independent file documents. Menus target the focused document; Settings configure the quick pad and shared preferences.
 - `project.yml` is the source for identity and build configuration. The generated `Pad.xcodeproj` and shared schemes are committed for Xcode Cloud; regenerate and commit them together, because CI fails if they differ.

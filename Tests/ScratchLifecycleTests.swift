@@ -70,7 +70,7 @@ import Testing
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
         let document = fixture.document
-        document.saveAutomatically = automaticSaving
+        document.drafts.saveAutomatically = automaticSaving
         document.text = "permanent file"
         if !automaticSaving { document.save() }
         document.close(now: start)
@@ -103,7 +103,7 @@ import Testing
         })
         defer { fixture.cleanUp() }
         let document = fixture.document
-        document.saveAutomatically = automaticSaving
+        document.drafts.saveAutomatically = automaticSaving
         document.text = "previous scratch"
         document.commandNew(now: start)
         #expect(confirmations == (automaticSaving ? 0 : 1))
@@ -119,7 +119,7 @@ import Testing
     @Test func untilClosedStartsEmptyOnImmediateReopen() throws {
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
-        fixture.document.reusePeriod = .alwaysNew
+        fixture.document.drafts.reusePeriod = .alwaysNew
         fixture.document.text = "temporary"
         fixture.document.close(now: start)
         fixture.document.showCurrent(now: start)
@@ -130,9 +130,9 @@ import Testing
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
         let document = fixture.document
-        #expect(document.format == .md)
+        #expect(document.drafts.format == .md)
         document.text = "**Markdown**"
-        document.format = .txt
+        document.drafts.format = .txt
         #expect(document.currentFormat == .md)
         let shared = try document.shareableURL(in: fixture.root)
         #expect(shared.pathExtension == "md")
@@ -296,7 +296,7 @@ import Testing
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
         let document = fixture.document
-        document.saveAutomatically = true
+        document.drafts.saveAutomatically = true
         document.text = "previous callback"
         document.editorSnapshot = { throw CocoaError(.fileReadUnknown) }
         #expect(await document.prepareToTerminate() == false)
@@ -329,7 +329,7 @@ private struct ScratchFixture {
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,
                                copyPath: { _ in }, resolveUnsavedChanges: resolveUnsavedChanges,
                                presentAlert: alerts.present)
-        document.saveAutomatically = false
+        document.drafts.saveAutomatically = false
     }
 
     func savedFiles() throws -> [URL] {

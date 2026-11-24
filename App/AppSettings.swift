@@ -7,45 +7,28 @@ import SwiftUI
 final class AppSettings {
     let diagnostics: PadDiagnostics
     private let defaults: UserDefaults
-    private var quickPadWidthValue: Double
+    private var dimensions: [Dimension: Double]
     var quickPadWidth: Double {
-        get { quickPadWidthValue }
-        set {
-            quickPadWidthValue = Self.dimension(newValue, fallback: 740, range: 520...1200)
-            defaults.set(quickPadWidthValue, forKey: "quickPadWidth")
-        }
+        get { value(.quickPadWidth) }
+        set { store(.quickPadWidth, newValue) }
     }
-    private var quickPadHeightValue: Double
     var quickPadHeight: Double {
-        get { quickPadHeightValue }
-        set {
-            quickPadHeightValue = Self.dimension(newValue, fallback: 480, range: 320...2400)
-            defaults.set(quickPadHeightValue, forKey: "quickPadHeight")
-        }
+        get { value(.quickPadHeight) }
+        set { store(.quickPadHeight, newValue) }
     }
-    private var fileWindowWidthValue: Double
     var fileWindowWidth: Double {
-        get { fileWindowWidthValue }
-        set {
-            fileWindowWidthValue = Self.dimension(newValue, fallback: 800, range: 520...3000)
-            defaults.set(fileWindowWidthValue, forKey: "fileWindowWidth")
-        }
+        get { value(.fileWindowWidth) }
+        set { store(.fileWindowWidth, newValue) }
     }
-    private var fileWindowHeightValue: Double
     var fileWindowHeight: Double {
-        get { fileWindowHeightValue }
-        set {
-            fileWindowHeightValue = Self.dimension(newValue, fallback: 860, range: 320...2400)
-            defaults.set(fileWindowHeightValue, forKey: "fileWindowHeight")
-        }
+        get { value(.fileWindowHeight) }
+        set { store(.fileWindowHeight, newValue) }
     }
-    private var textColumnWidthValue: Double
     var textColumnWidth: Double {
-        get { textColumnWidthValue }
+        get { value(.textColumnWidth) }
         set {
-            textColumnWidthValue = Self.dimension(newValue, fallback: 740, range: 320...3000)
-            defaults.set(textColumnWidthValue, forKey: "textColumnWidth")
-            if let presetWidth = textColumnWidthChoiceValue.width, presetWidth != textColumnWidthValue {
+            store(.textColumnWidth, newValue)
+            if let presetWidth = textColumnWidthChoiceValue.width, presetWidth != textColumnWidth {
                 textColumnWidthChoice = .custom
             }
         }
@@ -66,18 +49,50 @@ final class AppSettings {
     }
     var readingWidth: Double? { limitTextWidth ? textColumnWidth : nil }
 
-    private static func dimension(_ value: Double, fallback: Double, range: ClosedRange<Double>) -> Double {
-        value.isFinite ? min(range.upperBound, max(range.lowerBound, value)) : fallback
+    /// A stored window or text dimension: its preference key, default and allowed range.
+    private enum Dimension: String, CaseIterable {
+        case quickPadWidth, quickPadHeight, fileWindowWidth, fileWindowHeight, textColumnWidth
+
+        var defaultValue: Double {
+            switch self {
+            case .quickPadWidth: PadWindowSize.quickPad.width
+            case .quickPadHeight: PadWindowSize.quickPad.height
+            case .fileWindowWidth: PadWindowSize.fileWindow.width
+            case .fileWindowHeight: PadWindowSize.fileWindow.height
+            case .textColumnWidth: TextColumnWidthChoice.standard.width!
+            }
+        }
+
+        var range: ClosedRange<Double> {
+            switch self {
+            case .quickPadWidth: PadWindowSize.minimum.width...PadWindowSize.quickPadMaximumWidth
+            case .fileWindowWidth: PadWindowSize.minimum.width...3000
+            case .quickPadHeight, .fileWindowHeight: PadWindowSize.minimum.height...2400
+            case .textColumnWidth: 320...3000
+            }
+        }
+
+        func clamped(_ value: Double) -> Double {
+            value.isFinite ? min(range.upperBound, max(range.lowerBound, value)) : defaultValue
+        }
+    }
+
+    private func value(_ dimension: Dimension) -> Double { dimensions[dimension] ?? dimension.defaultValue }
+
+    private func store(_ dimension: Dimension, _ value: Double) {
+        let clamped = dimension.clamped(value)
+        dimensions[dimension] = clamped
+        defaults.set(clamped, forKey: dimension.rawValue)
     }
 
     func restoreQuickPadSize() {
-        quickPadWidth = 740
-        quickPadHeight = 480
+        quickPadWidth = PadWindowSize.quickPad.width
+        quickPadHeight = PadWindowSize.quickPad.height
     }
 
     func restoreFileWindowSize() {
-        fileWindowWidth = 800
-        fileWindowHeight = 860
+        fileWindowWidth = PadWindowSize.fileWindow.width
+        fileWindowHeight = PadWindowSize.fileWindow.height
     }
 
     func restoreEditorDefaults() {
@@ -93,7 +108,7 @@ final class AppSettings {
         restoreEditorDefaults()
         appearance = .system
         accent = .standard
-        customAccent = "BEBAFC"
+        customAccent = Self.defaultAccent
         menuBarIcon = .mark
         showFormatToggle = true
         setAccess(.both, from: window)
@@ -117,19 +132,21 @@ final class AppSettings {
     @ObservationIgnored private var activationCleanup: Task<Void, Never>?
     @ObservationIgnored private var requestedReactivation = false
 
+    /// PadPad's own accent, as an sRGB hex string.
+    static let defaultAccent = "BEBAFC"
+
     init(defaults: UserDefaults = .standard, diagnosticCacheURL: URL? = nil) {
         self.defaults = defaults
         diagnostics = PadDiagnostics(defaults: defaults, cacheURL: diagnosticCacheURL)
-        quickPadWidthValue = Self.dimension(defaults.object(forKey: "quickPadWidth") as? Double ?? 740, fallback: 740, range: 520...1200)
-        quickPadHeightValue = Self.dimension(defaults.object(forKey: "quickPadHeight") as? Double ?? 480, fallback: 480, range: 320...2400)
-        fileWindowWidthValue = Self.dimension(defaults.object(forKey: "fileWindowWidth") as? Double ?? 800, fallback: 800, range: 520...3000)
-        fileWindowHeightValue = Self.dimension(defaults.object(forKey: "fileWindowHeight") as? Double ?? 860, fallback: 860, range: 320...2400)
-        let storedColumnWidth = Self.dimension(defaults.object(forKey: "textColumnWidth") as? Double ?? 740, fallback: 740, range: 320...3000)
-        textColumnWidthValue = storedColumnWidth
+        var dimensions = Dimension.allCases.reduce(into: [Dimension: Double]()) { stored, dimension in
+            stored[dimension] = dimension.clamped(defaults.object(forKey: dimension.rawValue) as? Double ?? dimension.defaultValue)
+        }
+        let storedColumnWidth = dimensions[.textColumnWidth] ?? Dimension.textColumnWidth.defaultValue
         let storedColumnChoice = TextColumnWidthChoice(rawValue: defaults.string(forKey: "textColumnWidthChoice") ?? "")
             ?? TextColumnWidthChoice.allCases.first(where: { $0.width == storedColumnWidth }) ?? .custom
         textColumnWidthChoiceValue = storedColumnChoice
-        textColumnWidthValue = storedColumnChoice.width ?? storedColumnWidth
+        dimensions[.textColumnWidth] = storedColumnChoice.width ?? storedColumnWidth
+        self.dimensions = dimensions
         limitTextWidth = defaults.object(forKey: "limitTextWidth") == nil ? true : defaults.bool(forKey: "limitTextWidth")
         snapQuickPadToCenter = defaults.object(forKey: "snapQuickPadToCenter") == nil ? true : defaults.bool(forKey: "snapQuickPadToCenter")
         showInDock = defaults.object(forKey: "showInDock") == nil ? true : defaults.bool(forKey: "showInDock")
@@ -138,7 +155,7 @@ final class AppSettings {
         showFormatToggle = defaults.object(forKey: "showFormatToggle") == nil ? true : defaults.bool(forKey: "showFormatToggle")
         appearance = AppearanceChoice(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         accent = AccentChoice(rawValue: defaults.string(forKey: "accent") ?? "") ?? .standard
-        customAccent = defaults.string(forKey: "customAccent") ?? "BEBAFC"
+        customAccent = defaults.string(forKey: "customAccent") ?? Self.defaultAccent
     }
 
     var access: AppAccess { AppAccess(showInDock: showInDock, menuBarItem: menuBarItem) }
@@ -164,7 +181,8 @@ final class AppSettings {
 
     var accentColor: Color {
         if accent == .system { return Color(nsColor: .controlAccentColor) }
-        let value = UInt32(accent == .standard ? "BEBAFC" : customAccent, radix: 16) ?? 0xBEBAFC
+        let value = UInt32(accent == .standard ? Self.defaultAccent : customAccent, radix: 16)
+            ?? UInt32(Self.defaultAccent, radix: 16)!
         return Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
     }
 
@@ -317,6 +335,14 @@ enum AppearanceChoice: String, CaseIterable, Identifiable {
     var nativeAppearance: NSAppearance? {
         switch self { case .system: nil; case .light: NSAppearance(named: .aqua); case .dark: NSAppearance(named: .darkAqua) }
     }
+}
+
+/// Default and minimum window sizes, in points.
+enum PadWindowSize {
+    static let quickPad = NSSize(width: 740, height: 480)
+    static let fileWindow = NSSize(width: 800, height: 860)
+    static let minimum = NSSize(width: 520, height: 320)
+    static let quickPadMaximumWidth: CGFloat = 1_200
 }
 
 /// Presets describe the maximum text column, independent of the window width.

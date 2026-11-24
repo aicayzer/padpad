@@ -16,6 +16,8 @@ Config/Cloud.xcconfig
 _local/
 _tmp/
 _ignore/
+.worktrees/
+.claude/worktrees/
 *.keychain-db
 *.key
 *.p8

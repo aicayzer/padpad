@@ -46,7 +46,8 @@ final class ToolbarRefinementUITests: PadUITestCase {
         let name = app.textFields["Name"].firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertGreaterThan(name.frame.width, frame.width * 0.6)
-        XCTAssertEqual(name.value as? String, "Untitled")
+        // An unnamed draft offers the name Save would give it.
+        XCTAssertFalse((name.value as? String ?? "").isEmpty, app.debugDescription)
         XCTAssertFalse(app.staticTexts[".md"].exists, "Rename edits only the name")
         app.typeText("Small")
         app.typeKey(.return, modifierFlags: [])

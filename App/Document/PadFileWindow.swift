@@ -26,6 +26,9 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
             standardWindowButton(kind)?.isHidden = true
         }
         isExcludedFromWindowsMenu = false
+        // Resizing a zoomed window by hand unzooms it, so the header's Expand button follows every resize.
+        NotificationCenter.default.addObserver(self, selector: #selector(frameChanged),
+                                               name: NSWindow.didResizeNotification, object: self)
         input.attach()
         if files.startsInReadingMode { _ = makeFirstResponder(self) }
         restoreDefaultSize(animate: false)
@@ -36,7 +39,12 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
 
     override func close() { files.close() }
     func finishClosing() { super.close() }
-    func toggleExpanded() { zoom(nil) }
+    func toggleExpanded() {
+        zoom(nil)
+        files.isExpanded = isZoomed
+    }
+
+    @objc private func frameChanged() { files.isExpanded = isZoomed }
 
     func restoreDefaultSize(animate: Bool = true) {
         guard !styleMask.contains(.fullScreen), let screen = screen ?? NSScreen.main else { return }
@@ -45,6 +53,7 @@ final class PadFileWindow: NSWindow, PadDocumentWindow {
         let size = NSSize(width: min(preferred.width, visible.width), height: min(preferred.height, visible.height))
         setFrame(NSRect(origin: frame.origin, size: size), display: true, animate: animate)
         center()
+        files.isExpanded = false
         constrainToAvailableScreen()
     }
 

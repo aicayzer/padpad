@@ -493,7 +493,7 @@ import Testing
         #expect(fixture.defaults.string(forKey: "pad.format") == "md")
         #expect(document.currentFormat == .rtf)
         #expect(document.text == converted)
-        #expect(document.displayName == "Untitled")
+        #expect(document.displayName == "Draft")
         // Reset forgets the save folder, so choose it again, then save.
         fixture.selectedFolder = fixture.root
         document.save()

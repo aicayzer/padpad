@@ -55,10 +55,12 @@ final class FilenameInput: NSView, NSTokenFieldDelegate {
         add.refusesFirstResponder = true
         add.isBordered = false
         add.imagePosition = .imageOnly
+        add.contentTintColor = .secondaryLabelColor
         add.setAccessibilityLabel("Insert filename variable")
         let menu = NSMenu()
         let label = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        label.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Insert filename variable")
+        label.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Insert filename variable")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(hierarchicalColor: .secondaryLabelColor))
         menu.addItem(label)
         for (index, token) in PadNameToken.allCases.enumerated() {
             let item = NSMenuItem(title: token.title, action: #selector(insertVariable(_:)), keyEquivalent: "")

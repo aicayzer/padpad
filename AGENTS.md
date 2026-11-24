@@ -11,13 +11,17 @@ Commands, tests and CI are in [DEVELOPMENT.md](DEVELOPMENT.md); distribution is 
 - Initial launch stays hidden, including login launch. The global shortcut always targets the quick pad.
 - Opening a supported file creates an independent document window and leaves quick-pad text alone. Reopening the same file brings its window forward.
 - Open file windows keep the app in the Dock, including while minimized. Closing the last one restores the saved access preference. Hidden access omits the Dock and menu bar icons; reopening the app or using the global shortcut still shows the quick pad.
-- Defaults: quick pad 740 × 480 points, file windows 800 × 860 points, constrained to the screen. Defaults and the centered reading width are configurable. Initial placement and restoration use AppKit optical centering, and native file-window controls align with the custom header.
-- Restore Default Size restores the dimensions for that window type. Only the quick pad uses optional center snapping and its 1,200-point width ceiling.
+- Defaults: quick pad 740 × 480 points, file windows 800 × 860 points, constrained to the screen. Defaults and the centered reading width are configurable. Initial placement and restoration use AppKit optical centering.
+- Restore Default Size restores the dimensions for that window type. Only the quick pad uses optional center snapping.
+- Both window types hide the standard window buttons. The header's left side has Close and Expand: Expand fills the screen, keeping a small margin, and switches to Restore Size. Double-clicking the header does nothing.
 
 ### Header and formatting
 
 - The Aa control beside Share opens the formatting menu at every window width. It lists only the commands the loaded format supports, taken from InkKit command state: RTF shows alignment instead of headings, quotes and code blocks.
-- The right header orders Share, Aa and Save. Window and file actions stay in the native menus.
+- The right header orders Aa, Share and Save. Window and file actions stay in the native menus.
+- The title of an unsaved draft is **Draft**, fainter than a saved file's name; its tooltip says when it clears. Renaming a draft starts from the name Save would give it.
+- Share always works: an empty draft shares an empty file named as it would be saved, without saving it or using up its number.
+- Save reads **Saved** when the file is up to date, and then only confirms. An empty draft has nothing to save, so Save is disabled and ⌘S does nothing.
 - Formatting controls use neutral adaptive foreground colors, not the accent color.
 - Formatting shortcuts work independently of the menu. The editor keymap is in `PadMarkdownEditorController.keymap`, and window shortcuts may not use its keys. Restore Default Size and Copy All Contents use configurable local shortcut recorders.
 
@@ -25,10 +29,12 @@ Commands, tests and CI are in [DEVELOPMENT.md](DEVELOPMENT.md); distribution is 
 
 Scratch text is intentionally temporary, because the quick pad is a scratch surface and not a library.
 
-- With automatic saving off, closing hides the quick pad. Reopening within the configured time away restores the text; reopening after expiry starts empty, with no recovery archive or discard prompt.
+- Defaults: automatic saving off, drafts clear 30 minutes after closing.
+- Closing hides the quick pad. Reopening within the configured time away restores the text. Reopening after expiry starts a new empty draft, with no recovery archive or discard prompt. This applies to a saved file in the quick pad too: the file stays on disk, and the pad starts fresh. A saved file with unsaved edits never clears.
+- The first time unsaved text would clear, PadPad keeps it and explains once, in an alert, how drafts clear, with Open Settings as the alternative to OK. Reset App shows the explanation again.
 - Start the interval on dismissal and restart it after every reopen and dismiss cycle. Never expire active text. Settings and owned dialogs are not dismissal.
 - Do not discard scratch text on close or focus loss. It lives in memory only, so quitting does not preserve it.
-- Automatic saving and explicit Save preserve work as files. Generated names never replace a file: the number skips taken names, and restarts at 1 each day unless that setting is off. Expiry must never delete a saved file or silently discard edits to an opened file.
+- Automatic saving and explicit Save preserve work as files; automatic saving happens when the quick pad closes, including when you switch apps. Generated names never replace a file: the number skips taken names, and restarts at 1 each day unless that setting is off. Expiry must never delete a saved file or silently discard edits to an opened file.
 - Discarded-draft recovery is deferred. Do not add an archive or retention mechanism.
 
 ### Formats

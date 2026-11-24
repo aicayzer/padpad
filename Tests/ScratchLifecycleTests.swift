@@ -66,7 +66,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func savedFilesStayCurrentPastDraftExpiry(_ automaticSaving: Bool) throws {
+    func savedFilesStayUntilTheDraftPeriodThenThePadStartsFresh(_ automaticSaving: Bool) throws {
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
         let document = fixture.document
@@ -75,23 +75,59 @@ import Testing
         if !automaticSaving { document.save() }
         document.close(now: start)
         let saved = try #require(document.url)
-        document.showCurrent(now: start.addingTimeInterval(900))
+        document.showCurrent(now: start.addingTimeInterval(899))
         #expect(document.text == "permanent file")
         #expect(document.url == saved)
+        document.close(now: start.addingTimeInterval(899))
+        document.showCurrent(now: start.addingTimeInterval(899 + 900))
+        #expect(document.text.isEmpty)
+        #expect(document.url == nil)
+        // The file itself is never touched by the pad starting fresh.
         #expect(try String(contentsOf: saved, encoding: .utf8) == "permanent file")
+        #expect(fixture.alerts.alerts.isEmpty)
     }
 
-    @Test func openedFilesIgnoreScratchExpiry() throws {
+    @Test func savedFilesWithUnsavedEditsNeverClear() throws {
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
         let file = fixture.root.appending(path: "opened.md")
         try Data("# Keep this file".utf8).write(to: file)
         let document = fixture.document
         document.open(file)
+        document.text = "# Keep this edit"
         document.close(now: start)
         document.showCurrent(now: start.addingTimeInterval(86_400))
-        #expect(document.text == "# Keep this file")
+        #expect(document.text == "# Keep this edit")
         #expect(document.url == file)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "# Keep this file")
+    }
+
+    @Test func theFirstDraftThatWouldClearIsKeptAndExplainedOnce() throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.drafts.explainedClearing = false
+        document.text = "first draft"
+        document.close(now: start)
+        document.showCurrent(now: start.addingTimeInterval(900))
+        #expect(document.text == "first draft")
+        #expect(document.drafts.explainedClearing)
+        #expect(fixture.alerts.alerts == [.draftKept(clearing: "15 minutes after you close PadPad")])
+        document.close(now: start.addingTimeInterval(900))
+        document.showCurrent(now: start.addingTimeInterval(1_800))
+        #expect(document.text.isEmpty)
+        #expect(fixture.alerts.alerts.count == 1)
+    }
+
+    @Test func anEmptyDraftClearsWithoutTheExplanation() throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.drafts.explainedClearing = false
+        document.close(now: start)
+        document.showCurrent(now: start.addingTimeInterval(900))
+        #expect(fixture.alerts.alerts.isEmpty)
+        #expect(!document.drafts.explainedClearing)
     }
 
     @Test(arguments: [false, true])
@@ -276,20 +312,29 @@ import Testing
         #expect(document.folderError == nil)
     }
 
-    @Test func emptyShareDoesNotCreateAFileAndUntitledUsesVisibleName() throws {
+    @Test func sharingADraftUsesItsFutureNameWithoutSavingOrUsingTheNumber() throws {
         let fixture = try ScratchFixture()
         defer { fixture.cleanUp() }
         let document = fixture.document
-        #expect(!document.canShare)
-        #expect(throws: PadError.self) { try document.shareableURL(in: fixture.root) }
-        #expect(try fixture.savedFiles().isEmpty)
-        document.text = "Hello\r\nworld 🌍"
+        let shares = fixture.root.appending(path: "shares", directoryHint: .isDirectory)
+        // A file already has the first generated name, so the draft's name skips it, as Save does.
+        let taken = fixture.root.appending(path: document.namePreview)
+        try Data("taken".utf8).write(to: taken)
+        // An empty draft shares an empty file.
         #expect(document.canShare)
-        let shared = try document.shareableURL(in: fixture.root)
-        #expect(shared.lastPathComponent == "Untitled.md")
+        let empty = try document.shareableURL(in: shares)
+        #expect(try Data(contentsOf: empty).isEmpty)
+        #expect(empty.lastPathComponent != taken.lastPathComponent)
+        #expect(empty.lastPathComponent.hasSuffix("-002.md"))
+        #expect(document.editableName + ".md" == empty.lastPathComponent)
+        document.text = "Hello\r\nworld 🌍"
+        let shared = try document.shareableURL(in: shares)
+        #expect(shared.lastPathComponent == empty.lastPathComponent)
         #expect(try String(contentsOf: shared, encoding: .utf8) == document.text)
+        // Sharing neither saves the draft nor uses up its generated number.
+        #expect(Set(try fixture.savedFiles().map(\.lastPathComponent)) == ["shares", taken.lastPathComponent])
         document.save()
-        #expect(document.url?.lastPathComponent != "Untitled.md")
+        #expect(document.url?.lastPathComponent == empty.lastPathComponent)
     }
 
     @Test func terminationWaitsForSnapshotAndRefusesSnapshotFailure() async throws {
@@ -324,6 +369,7 @@ private struct ScratchFixture {
     init(resolveUnsavedChanges: @escaping @MainActor () -> PadUnsavedChangesDecision = { .cancel }) throws {
         suite = "pad-scratch-tests-\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.setLifecyclePreferences(saveAutomatically: false)
         root = FileManager.default.temporaryDirectory.appending(path: suite)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         document = PadDocument(defaults: defaults, defaultFolder: root, presentsWindow: false,

@@ -63,8 +63,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
             self?.input.prepareTitleFocus()
         }).environment(files.appSettings ?? AppSettings())
             // Hosting derives the native minimum from the content's constraints.
-            .frame(minWidth: PadWindowSize.minimum.width, maxWidth: PadWindowSize.quickPadMaximumWidth, minHeight: PadWindowSize.minimum.height))
-        maxSize = NSSize(width: PadWindowSize.quickPadMaximumWidth, height: CGFloat.greatestFiniteMagnitude)
+            .frame(minWidth: PadWindowSize.minimum.width, minHeight: PadWindowSize.minimum.height))
         input.attach()
         if files.startsInReadingMode { _ = makeFirstResponder(self) }
         NotificationCenter.default.addObserver(self, selector: #selector(applicationBecameActive),
@@ -217,6 +216,7 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         let preferred = files.defaultWindowSize
         let size = NSSize(width: min(preferred.width, visible.width), height: min(preferred.height, visible.height))
         previousFrame = nil
+        files.isExpanded = false
         setFrame(NSRect(origin: frame.origin, size: size), display: true, animate: animate)
         setFrameOrigin(PadQuickPadPlacement.frame(size: size, in: screen.visibleFrame).origin)
         setFrame(constrainFrameRect(frame, to: screen), display: true)
@@ -239,17 +239,16 @@ final class PadPanel: NSPanel, PadDocumentWindow {
         if target != frame { setFrame(target, display: true) }
     }
 
+    /// Fills the screen, keeping a small margin, or returns to the size and place it had before.
     func toggleExpanded() {
         if let previousFrame {
-            setFrame(previousFrame, display: true, animate: true)
             self.previousFrame = nil
+            setFrame(previousFrame, display: true, animate: true)
         } else if let screen = screen ?? NSScreen.main {
             previousFrame = frame
-            var expanded = screen.visibleFrame.insetBy(dx: 24, dy: 24)
-            expanded.size.width = min(expanded.width, PadWindowSize.quickPadMaximumWidth)
-            expanded.origin.x = screen.visibleFrame.midX - expanded.width / 2
-            setFrame(expanded, display: true, animate: true)
+            setFrame(screen.visibleFrame.insetBy(dx: 24, dy: 24), display: true, animate: true)
         }
+        files.isExpanded = previousFrame != nil
     }
 
     override func becomeKey() {
@@ -322,17 +321,20 @@ struct PadView: View {
     private var editorLayout: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
-                let titleSpace = max(40, geometry.size.width - 216)
+                let titleSpace = max(40, geometry.size.width - 240)
                 HStack(spacing: 6) {
-                    Button { files.close() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 14, height: 14)
-                            .frame(width: 22, height: 26)
+                    HStack(spacing: 0) {
+                        windowButton("xmark.circle.fill", label: files.isQuickPad ? "Close PadPad" : "Close file") {
+                            files.close()
+                        }
+                        windowButton(files.isExpanded ? "arrow.down.right.and.arrow.up.left.circle.fill"
+                                                      : "arrow.up.left.and.arrow.down.right.circle.fill",
+                                     label: files.isExpanded ? "Restore Size" : "Expand") {
+                            files.expand()
+                        }
+                        .accessibilityIdentifier("expandWindow")
                     }
                     .padding(.trailing, -2)
-                    .accessibilityLabel(files.isQuickPad ? "Close PadPad" : "Close file")
                     HStack(spacing: 5) {
                         if renaming {
                             HStack(spacing: 2) {
@@ -348,10 +350,13 @@ struct PadView: View {
                         } else {
                             Text(files.displayName)
                                 .font(.system(size: 14, weight: .semibold))
+                                // A draft's title is fainter than a saved file's name, so it never reads as a file name.
+                                .foregroundStyle(files.url == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .accessibilityIdentifier("documentTitle")
-                                .help("Rename (⌘R or double-click)")
+                                .accessibilityValue(files.draftStatus ?? "")
+                                .help(files.draftStatus.map { "\($0) Double-click to name it." } ?? "Rename (⌘R or double-click)")
                                 .fixedSize(horizontal: false, vertical: true)
                                 .onTapGesture(count: 2, perform: beginRename)
                                 .simultaneousGesture(WindowDragGesture())
@@ -382,10 +387,18 @@ struct PadView: View {
                         .disabled(!files.canShare)
                     }
                     .fixedSize()
-                    Button("Save") { files.save() }
-                        .buttonStyle(PadToolbarButtonStyle(primary: true))
-                        .disabled(!files.isDirty)
-                        .fixedSize()
+                    Button { files.save() } label: {
+                        // Reserve the longer label's width, so the header doesn't shift when the label changes.
+                        ZStack {
+                            Text("Saved").hidden()
+                            Text(files.isSaved ? "Saved" : "Save")
+                        }
+                    }
+                    .buttonStyle(PadToolbarButtonStyle(primary: true, quiet: files.isSaved))
+                    .disabled(!files.canSave)
+                    .accessibilityLabel("Save")
+                    .accessibilityValue(files.isSaved ? "Saved" : "")
+                    .fixedSize()
                 }
                 .padding(.leading, 8)
                 .padding(.trailing, 10)
@@ -399,8 +412,7 @@ struct PadView: View {
             .background {
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { files.expand() }
-                    .simultaneousGesture(WindowDragGesture())
+                    .gesture(WindowDragGesture())
             }
 
             ZStack(alignment: .bottom) {
@@ -538,6 +550,18 @@ struct PadView: View {
         }
     }
 
+    private func windowButton(_ symbol: String, label: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Image(systemName: symbol)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+                .frame(width: 22, height: 26)
+        }
+        .accessibilityLabel(label)
+        .help(label)
+    }
+
     private func actionIcon(_ symbol: String, label: String, verticalOffset: CGFloat,
                             perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
@@ -576,18 +600,26 @@ private struct PadFormatButtonStyle: ButtonStyle {
 private struct PadToolbarButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     var primary = false
+    /// A primary button with nothing to do right now, such as Save when the file is up to date.
+    var quiet = false
     @State private var hovered = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(isEnabled && primary ? .primary : .secondary)
+            .foregroundStyle(isEnabled && primary && !quiet ? .primary : .secondary)
             .frame(height: 16)
             .padding(.horizontal, primary ? 14 : 8)
             .padding(.vertical, 4)
-            .background(Color.primary.opacity(primary || (isEnabled && (hovered || configuration.isPressed)) ? 0.1 : 0), in: Capsule())
+            .background(Color.primary.opacity(backgroundOpacity(pressed: configuration.isPressed)), in: Capsule())
             .contentShape(Capsule())
             .onHover { hovered = $0 }
+    }
+
+    private func backgroundOpacity(pressed: Bool) -> Double {
+        let active = isEnabled && (hovered || pressed)
+        if primary { return active ? 0.16 : 0.1 }
+        return active ? 0.1 : 0
     }
 }
 

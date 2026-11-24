@@ -208,7 +208,8 @@ extension PadDocument {
 
     func save() {
         if synchronizeEditorThen({ self.save() }) { return }
-        guard !isBusy else { return }
+        // A draft with nothing in it never becomes a file, including through the keyboard shortcut.
+        guard !isBusy, url != nil || isDirty else { return }
         saveCurrent()
     }
 
@@ -237,8 +238,8 @@ extension PadDocument {
                 let bytesOnDisk = try Data(contentsOf: url)
                 observedBytes = bytesOnDisk
                 guard bytesOnDisk == baseline else { throw PadError.changed }
-                // Writing RTF restyles the whole file, so an unedited RTF file is never rewritten.
-                if currentFormat == .rtf, !isDirty {
+                // An up-to-date file is never rewritten; for RTF, writing would also restyle the whole file.
+                if !isDirty {
                     announceFile("Saved")
                     error = nil
                     reportedReadFailure = nil
@@ -286,6 +287,8 @@ extension PadDocument {
         operation = .filePanel
         defer { operation = nil }
         guard await captureLatestEditor() else { return }
+        // A draft with nothing in it never becomes a file.
+        guard url != nil || isDirty else { return }
         let previousFormat = currentFormat
         let saveFormat = targetFormat ?? currentFormat
         let id = documentID
@@ -411,15 +414,16 @@ extension PadDocument {
         }
     }
 
+    /// The file to share: the saved file when it is up to date, otherwise a copy of the current text. An empty
+    /// draft shares an empty file, named as the draft would be saved.
     func shareableURL(in temporaryFolder: URL = FileManager.default.temporaryDirectory) throws -> URL {
-        guard !text.isEmpty else { throw PadError.emptyShare }
         if let url, !isDirty, let current = try? Data(contentsOf: url), current == baseline { return url }
         let directory = temporaryFolder.appending(path: "PadShare-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let name: String
         if let url { name = url.lastPathComponent }
         else if let pendingName { name = "\(pendingName).\(currentFormat.rawValue)" }
-        else { name = "Untitled.\(currentFormat.rawValue)" }
+        else { name = drafts.nextName(in: folder, format: currentFormat, now: currentDate()) ?? "Draft.\(currentFormat.rawValue)" }
         let snapshot = directory.appending(path: name)
         try currentFormat.encode(text).write(to: snapshot, options: .atomic)
         return snapshot

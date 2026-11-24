@@ -15,7 +15,6 @@ enum PadError: Error {
     case nameTooLong
     case nameExists
     case renamePermission
-    case emptyShare
 }
 
 enum PadUnsavedChangesDecision {
@@ -214,7 +213,7 @@ final class PadDocument {
     var currentFormat: PadFormat { url.flatMap { PadFormat(rawValue: $0.pathExtension.lowercased()) } ?? scratchFormat }
 
     var isDirty: Bool { text != savedText }
-    var canShare: Bool { !text.isEmpty && !isBusy }
+    var canShare: Bool { !isBusy }
     var isBusy: Bool { operation != nil || alert != nil }
     var isVisible: Bool { panel?.isVisible == true }
     var needsFolderSelection: Bool { !hasSaveFolderAccess }
@@ -223,10 +222,28 @@ final class PadDocument {
         folderScope != nil || folder.resolvingSymlinksInPath().pathComponents
             .starts(with: FileManager.default.temporaryDirectory.resolvingSymlinksInPath().pathComponents)
     }
-    var editableName: String { url?.deletingPathExtension().lastPathComponent ?? pendingName ?? "Untitled" }
-    var displayName: String {
-        url?.lastPathComponent ?? pendingName.map { "\($0).\(currentFormat.rawValue)" } ?? "Untitled"
+    /// The name to edit when renaming. An unnamed draft starts from the name Save would give it.
+    var editableName: String {
+        if let url { return url.deletingPathExtension().lastPathComponent }
+        if let pendingName { return pendingName }
+        return drafts.nextName(in: folder, format: currentFormat, now: currentDate())
+            .map { ($0 as NSString).deletingPathExtension } ?? ""
     }
+    var displayName: String {
+        url?.lastPathComponent ?? pendingName.map { "\($0).\(currentFormat.rawValue)" } ?? "Draft"
+    }
+    /// What happens to an unsaved quick-pad draft, for its title. Nil once the document is a file.
+    var draftStatus: String? {
+        guard url == nil else { return nil }
+        if isQuickPad && drafts.saveAutomatically { return "Not saved yet. PadPad saves it when you close it." }
+        return "Not saved. Drafts clear \(drafts.clearingDescription)."
+    }
+    /// The file holds everything in the editor.
+    var isSaved: Bool { url != nil && !isDirty }
+    /// Save has something to do: write changes, create a file from a draft with text, or confirm a saved file.
+    var canSave: Bool { !isBusy && (url != nil || isDirty) }
+    /// The quick pad fills the screen, or a file window is zoomed. The header shows the matching button.
+    var isExpanded = false
     var namePreview: String { drafts.namePreview(now: currentDate()) }
 
     /// Clicking the message pill clears the problem it shows: a document error first, then editor feedback.
@@ -296,7 +313,7 @@ final class PadDocument {
         }
     }
 
-    private func present(_ alert: PadAlert) {
+    func present(_ alert: PadAlert) {
         // A file that fails to open has no window, and an alert without a window can open where nobody
         // sees it. The alert becomes a sheet on the window the person is using, or on the quick pad,
         // which stays busy, and so visible, until the alert closes.

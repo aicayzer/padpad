@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite struct MessageTests {
     @Test func smallProblemsWithAnObviousFixArePanelMessages() {
-        for error: PadError in [.emptyName, .nameTooLong, .invalidName, .nameExists, .emptyShare] {
+        for error: PadError in [.emptyName, .nameTooLong, .invalidName, .nameExists] {
             for context: PadProblem.Context in [.rename, .save, .saveAs, .nameFormat] {
                 #expect(expectedMessage(error, during: context) != nil, "\(error) during \(context)")
             }
@@ -72,7 +72,7 @@ import Testing
 
         let errors: [any Error] = [PadError.unsupported, PadError.encoding, PadError.changed, PadError.missingFolder,
                                    PadError.invalidName, PadError.emptyName, PadError.nameTooLong, PadError.nameExists,
-                                   PadError.renamePermission, PadError.emptyShare, PadMarkdownEditorError.notReady,
+                                   PadError.renamePermission, PadMarkdownEditorError.notReady,
                                    PadMarkdownEditorError.composing, PadMarkdownEditorError.unavailable,
                                    CocoaError(.fileReadNoSuchFile), CocoaError(.fileReadNoPermission),
                                    CocoaError(.fileWriteNoPermission), CocoaError(.fileWriteOutOfSpace), POSIXError(.EIO)]

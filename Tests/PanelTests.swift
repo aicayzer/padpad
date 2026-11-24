@@ -37,6 +37,33 @@ struct PanelTests {
         #expect(panel.level == (floating ? NSWindow.Level.normal : .floating))
     }
 
+    @Test func expandFillsTheScreenAndRestoresThePreviousFrame() throws {
+        let suite = "pad-expand-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "pad.onboardingCompleted")
+        defaults.set("txt", forKey: "pad.format")
+        let document = PadDocument(defaults: defaults, presentAlert: AlertRecorder().present)
+        defer {
+            document.close()
+            document.nativeWindow?.contentView = nil
+            defaults.removePersistentDomain(forName: suite)
+        }
+        document.handleGlobalShortcut()
+        let panel = try #require(document.nativeWindow as? PadPanel)
+        let original = panel.frame
+        let screen = try #require(panel.screen ?? NSScreen.main)
+        document.expand()
+        #expect(document.isExpanded)
+        // No width ceiling: the expanded pad fills the screen apart from its margin.
+        #expect(abs(panel.frame.width - (screen.visibleFrame.width - 48)) < 1)
+        document.expand()
+        #expect(!document.isExpanded)
+        #expect(panel.frame == original)
+        document.expand()
+        document.restoreDefaultSize()
+        #expect(!document.isExpanded)
+    }
+
     @Test func hostingContentKeepsTheExplicitCompactWindowMinimum() async throws {
         let suite = "pad-sizing-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -323,6 +350,7 @@ struct PanelTests {
         let suite = "pad-close-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set("txt", forKey: "pad.format")
+        defaults.setLifecyclePreferences(saveAutomatically: true)
         let alerts = AlertRecorder()
         let document = PadDocument(defaults: defaults, defaultFolder: root, copyPath: { _ in }, presentAlert: alerts.present)
         defer {

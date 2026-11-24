@@ -115,12 +115,14 @@ final class PadDraftSettings {
     func namePreview(now: Date) -> String {
         // Read the observed values so the preview follows the counter and its setting.
         _ = (nextNumber, resetsNumberDaily)
-        return nextName(format: format, now: now) ?? "Invalid filename"
+        return (try? PadFilename.name(parts: nameParts, format: format, now: now, number: startingNumber(on: now)))
+            ?? "Invalid filename"
     }
 
-    /// The name the next generated file would get, without using up its number.
-    func nextName(format: PadFormat, now: Date) -> String? {
-        try? PadFilename.name(parts: nameParts, format: format, now: now, number: startingNumber(on: now))
+    /// The name the next generated file in `folder` would get, skipping taken names, without using up its number.
+    func nextName(in folder: URL, format: PadFormat, now: Date) -> String? {
+        (try? PadFilename.available(in: folder, parts: nameParts, format: format, now: now,
+                                    number: startingNumber(on: now)))?.url.lastPathComponent
     }
 
     /// Says when a closed draft clears, for Settings and the draft title.

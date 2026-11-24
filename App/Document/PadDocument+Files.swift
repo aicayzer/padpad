@@ -287,6 +287,8 @@ extension PadDocument {
         operation = .filePanel
         defer { operation = nil }
         guard await captureLatestEditor() else { return }
+        // A draft with nothing in it never becomes a file.
+        guard url != nil || isDirty else { return }
         let previousFormat = currentFormat
         let saveFormat = targetFormat ?? currentFormat
         let id = documentID
@@ -421,7 +423,7 @@ extension PadDocument {
         let name: String
         if let url { name = url.lastPathComponent }
         else if let pendingName { name = "\(pendingName).\(currentFormat.rawValue)" }
-        else { name = drafts.nextName(format: currentFormat, now: currentDate()) ?? "Draft.\(currentFormat.rawValue)" }
+        else { name = drafts.nextName(in: folder, format: currentFormat, now: currentDate()) ?? "Draft.\(currentFormat.rawValue)" }
         let snapshot = directory.appending(path: name)
         try currentFormat.encode(text).write(to: snapshot, options: .atomic)
         return snapshot

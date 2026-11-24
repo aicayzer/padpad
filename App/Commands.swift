@@ -31,7 +31,7 @@ struct AppCommands: Commands {
                 .disabled(!canEdit || !document.isDirty)
             Button("Save As…") { Task { await document.saveAs() } }
                 .keyboardShortcut(document.editingShortcuts.shortcut(for: .saveAs)?.toSwiftUI)
-                .disabled(!canEdit)
+                .disabled(!canEdit || !document.canSave)
             Button("Rename…") { document.requestRename() }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(!canEdit)

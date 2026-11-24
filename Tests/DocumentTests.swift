@@ -218,6 +218,7 @@ import Testing
         #expect(files.isSaved)
         let marker = Date(timeIntervalSinceReferenceDate: 0)
         try FileManager.default.setAttributes([.modificationDate: marker], ofItemAtPath: url.path)
+        files.notice = nil
         files.save()
         #expect(files.notice == "Saved")
         #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == marker)
@@ -449,13 +450,19 @@ import Testing
         #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).count == 1)
     }
 
-    @Test func emptyDraftNeverBecomesAFile() throws {
-        let (files, root, _, _) = try fixture()
+    @Test func emptyDraftNeverBecomesAFile() async throws {
+        var pickerRequests = 0
+        let (files, root, _, _) = try fixture(selectSaveFile: { folder, name in
+            pickerRequests += 1
+            return folder.appending(path: name)
+        })
         defer { try? FileManager.default.removeItem(at: root) }
         files.newFile()
         #expect(!files.canSave)
         // The keyboard shortcut reaches save() even while the button is disabled.
         files.save()
+        await files.saveAs()
+        #expect(pickerRequests == 0)
         files.close()
         #expect(files.url == nil)
         #expect(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).isEmpty)

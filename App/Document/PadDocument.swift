@@ -226,7 +226,8 @@ final class PadDocument {
     var editableName: String {
         if let url { return url.deletingPathExtension().lastPathComponent }
         if let pendingName { return pendingName }
-        return drafts.nextName(format: currentFormat, now: currentDate()).map { ($0 as NSString).deletingPathExtension } ?? ""
+        return drafts.nextName(in: folder, format: currentFormat, now: currentDate())
+            .map { ($0 as NSString).deletingPathExtension } ?? ""
     }
     var displayName: String {
         url?.lastPathComponent ?? pendingName.map { "\($0).\(currentFormat.rawValue)" } ?? "Draft"

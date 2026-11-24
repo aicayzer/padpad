@@ -317,18 +317,22 @@ import Testing
         defer { fixture.cleanUp() }
         let document = fixture.document
         let shares = fixture.root.appending(path: "shares", directoryHint: .isDirectory)
+        // A file already has the first generated name, so the draft's name skips it, as Save does.
+        let taken = fixture.root.appending(path: document.namePreview)
+        try Data("taken".utf8).write(to: taken)
         // An empty draft shares an empty file.
         #expect(document.canShare)
         let empty = try document.shareableURL(in: shares)
         #expect(try Data(contentsOf: empty).isEmpty)
-        let expectedName = try #require(document.namePreview.components(separatedBy: ".").first)
-        #expect(empty.lastPathComponent == "\(expectedName).md")
+        #expect(empty.lastPathComponent != taken.lastPathComponent)
+        #expect(empty.lastPathComponent.hasSuffix("-002.md"))
+        #expect(document.editableName + ".md" == empty.lastPathComponent)
         document.text = "Hello\r\nworld 🌍"
         let shared = try document.shareableURL(in: shares)
         #expect(shared.lastPathComponent == empty.lastPathComponent)
         #expect(try String(contentsOf: shared, encoding: .utf8) == document.text)
         // Sharing neither saves the draft nor uses up its generated number.
-        #expect(try fixture.savedFiles().map(\.lastPathComponent) == ["shares"])
+        #expect(Set(try fixture.savedFiles().map(\.lastPathComponent)) == ["shares", taken.lastPathComponent])
         document.save()
         #expect(document.url?.lastPathComponent == empty.lastPathComponent)
     }

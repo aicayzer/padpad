@@ -1,6 +1,6 @@
 # PadPad
 
-PadPad is a native macOS app for editing individual plain text, Markdown and RTF files. It has no note library, CLI, updater, or integration with another app.
+PadPad is a native macOS app for editing individual plain text, Markdown and RTF files. It has no note library, CLI, updater, or integration with another app. Two Shortcuts actions (`App/PadIntents.swift`) are its only automation: Show PadPad, and Add to PadPad, which appends text to the quick pad's draft and shows it.
 
 Commands, tests and CI are in [DEVELOPMENT.md](DEVELOPMENT.md); distribution is in [RELEASING.md](RELEASING.md). This file holds the rules and product behavior those files do not.
 

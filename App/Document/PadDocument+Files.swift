@@ -267,7 +267,7 @@ extension PadDocument {
                 baseline = bytes
                 savedText = text
                 documentScope = folder.startAccessingSecurityScopedResource() ? folder : nil
-                if copyingPath || drafts.copiesPathAfterSaving {
+                if copyingPath || drafts.copiesPathOnSave {
                     copyPath(destination.path)
                     announceFile("Saved. Path copied.")
                 } else {

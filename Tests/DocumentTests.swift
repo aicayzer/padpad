@@ -200,6 +200,29 @@ import Testing
         #expect(files.drafts.resetsNumberDaily)
     }
 
+    @Test func launchArgumentsOverrideStoredSavingAndNumberingSettings() throws {
+        let suite = "pad-argument-saving-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let previous = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer {
+            defaults.setVolatileDomain(previous, forName: UserDefaults.argumentDomain)
+            defaults.removePersistentDomain(forName: suite)
+        }
+        defaults.setVolatileDomain(["pad.copyPathAfterSaving": "NO", "pad.resetNumberDaily": "NO"],
+                                   forName: UserDefaults.argumentDomain)
+        let (files, root, _, copiedPath) = try fixture(defaults: defaults)
+        defer { try? FileManager.default.removeItem(at: root) }
+        files.drafts.copiesPathAfterSaving = true
+        files.drafts.resetsNumberDaily = true
+        defaults.set(5, forKey: "pad.nextNumber")
+        defaults.set("1999-01-01", forKey: "pad.numberDay")
+        files.text = "draft"
+        files.save()
+        #expect(copiedPath() == nil)
+        // With daily reset overridden off, the counter carries on from 5 rather than restarting at 1.
+        #expect(files.url?.lastPathComponent.contains("-005.") == true)
+    }
+
     @Test func copyPathCopiesAFileAndSavesADraftFirst() throws {
         let (files, root, _, copiedPath) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }

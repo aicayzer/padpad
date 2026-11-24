@@ -256,6 +256,31 @@ import Testing
         #expect(fixture.defaults.stringArray(forKey: "pad.enabledFormats") == ["md", "txt", "rtf"])
     }
 
+    @Test func fileWindowInitializationDoesNotWriteQuickPadPreferences() throws {
+        let fixture = try FormatSwitchFixture(format: .rtf)
+        defer { fixture.cleanUp() }
+        fixture.defaults.set(["txt"], forKey: "pad.enabledFormats")
+        _ = PadDocument(defaults: fixture.defaults, presentsWindow: false, role: .file)
+        #expect(fixture.defaults.string(forKey: "pad.format") == "rtf")
+        #expect(fixture.defaults.stringArray(forKey: "pad.enabledFormats") == ["txt"])
+    }
+
+    @Test func fileDocumentsNeverSaveAutomatically() throws {
+        let fixture = try FormatSwitchFixture()
+        defer { fixture.cleanUp() }
+        let file = fixture.root.appending(path: "note.txt")
+        try Data("Plain text".utf8).write(to: file)
+        let drafts = PadDraftSettings(defaults: fixture.defaults)
+        drafts.saveAutomatically = true
+        let document = PadDocument(defaults: fixture.defaults, presentsWindow: false, role: .file, drafts: drafts,
+                                   resolveUnsavedChanges: { .cancel })
+        #expect(document.openDocument(file))
+        document.text = "Edited"
+        // Quitting asks about a file window's changes instead of saving them, and here the person cancels.
+        #expect(!document.canTerminate())
+        #expect(try String(contentsOf: file, encoding: .utf8) == "Plain text")
+    }
+
     @Test func disabledMenuActionDoesNotCaptureOrConvert() async throws {
         let fixture = try FormatSwitchFixture()
         defer { fixture.cleanUp() }

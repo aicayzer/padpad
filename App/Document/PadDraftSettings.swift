@@ -68,7 +68,8 @@ final class PadDraftSettings {
         static let copyPathAfterSaving = "pad.copyPathAfterSaving"
     }
 
-    init(defaults: UserDefaults) {
+    /// Only the quick pad's settings correct invalid stored formats; a file document reading them changes nothing.
+    init(defaults: UserDefaults, correctsStoredFormats: Bool = true) {
         self.defaults = defaults
         let storedFormats = defaults.stringArray(forKey: Keys.enabledFormats)
         let selected = PadFormat.allCases.filter { storedFormats?.contains($0.rawValue) ?? true }
@@ -77,7 +78,7 @@ final class PadDraftSettings {
         let storedDefault = defaults.string(forKey: Keys.format).flatMap(PadFormat.init(rawValue:)) ?? .md
         let initialFormat = enabled.contains(storedDefault) ? storedDefault : enabled[0]
         defaultFormat = initialFormat
-        if defaults.object(forKey: Keys.enabledFormats) != nil {
+        if correctsStoredFormats, defaults.object(forKey: Keys.enabledFormats) != nil {
             if storedFormats != enabled.map(\.rawValue) { defaults.set(enabled.map(\.rawValue), forKey: Keys.enabledFormats) }
             if initialFormat != storedDefault { defaults.set(initialFormat.rawValue, forKey: Keys.format) }
         }
@@ -87,7 +88,7 @@ final class PadDraftSettings {
         nameParts = defaults.data(forKey: Keys.nameParts)
             .flatMap { try? JSONDecoder().decode([PadNamePart].self, from: $0) } ?? PadFilename.defaultParts
         copiesPathAfterSaving = defaults.bool(forKey: Keys.copyPathAfterSaving)
-        resetsNumberDaily = defaults.object(forKey: Keys.resetNumberDaily) as? Bool ?? true
+        resetsNumberDaily = defaults.object(forKey: Keys.resetNumberDaily) == nil || defaults.bool(forKey: Keys.resetNumberDaily)
         nextNumber = max(1, defaults.integer(forKey: Keys.nextNumber))
     }
 
@@ -99,6 +100,9 @@ final class PadDraftSettings {
         defaults.set(enabledFormats.map(\.rawValue), forKey: Keys.enabledFormats)
         if !selected.contains(format), let first = enabledFormats.first { format = first }
     }
+
+    /// Whether Save copies a new file's path. Read from defaults, so a launch-argument override still wins.
+    var copiesPathOnSave: Bool { defaults.bool(forKey: Keys.copyPathAfterSaving) }
 
     /// An example of the next generated name, for Settings.
     func namePreview(now: Date) -> String {
@@ -112,7 +116,9 @@ final class PadDraftSettings {
     /// from defaults; with daily reset on, a counter last used on another day starts again at 1.
     func startingNumber(on date: Date) -> Int {
         let stored = max(1, defaults.integer(forKey: Keys.nextNumber))
-        guard resetsNumberDaily else { return stored }
+        // Read the stored value, not the property, so a launch-argument override still wins.
+        let resets = defaults.object(forKey: Keys.resetNumberDaily) == nil || defaults.bool(forKey: Keys.resetNumberDaily)
+        guard resets else { return stored }
         return defaults.string(forKey: Keys.numberDay) == Self.dayStamp(date) ? stored : 1
     }
 

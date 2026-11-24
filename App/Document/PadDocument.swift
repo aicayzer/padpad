@@ -195,7 +195,7 @@ final class PadDocument {
         let defaultFloating = true
         #endif
         floating = defaults.object(forKey: Self.floatingKey) == nil ? defaultFloating : defaults.bool(forKey: Self.floatingKey)
-        let drafts = drafts ?? PadDraftSettings(defaults: defaults)
+        let drafts = drafts ?? PadDraftSettings(defaults: defaults, correctsStoredFormats: role == .quickPad)
         self.drafts = drafts
         scratchFormat = drafts.format
         folder = defaultFolder ?? Self.downloadsFolder

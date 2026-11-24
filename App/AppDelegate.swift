@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import KeyboardShortcuts
 
@@ -13,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings = AppSettings(defaults: defaults)
         workspace = PadWorkspace(settings: settings, defaults: defaults, presentsWindows: !Self.isTestHost)
         super.init()
+        // Shortcuts can launch PadPad just to run an action, so the workspace must be available from the start.
+        let workspace = workspace
+        AppDependencyManager.shared.add(dependency: workspace)
         if Self.isTestHost { KeyboardShortcuts.isEnabled = false }
     }
 

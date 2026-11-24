@@ -1,4 +1,5 @@
 import Foundation
+import InkKitRTF
 import Testing
 @testable import Pad
 
@@ -310,6 +311,53 @@ import Testing
         #expect(document.url == file)
         #expect(fixture.alerts.last == PadError.encoding.alert(during: .read))
         #expect(document.folderError == nil)
+    }
+
+    @Test(arguments: [(PadFormat.md, "First\n\nSecond"), (.txt, "First\nSecond")])
+    func addingFromShortcutsAppendsToTheDraft(format: PadFormat, expected: String) async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.drafts.format = format
+        document.newFile()
+        document.onboarding.complete()
+        try await document.add("First")
+        #expect(document.text == "First")
+        document.text += "\n\n"
+        try await document.add("Second")
+        #expect(document.text == expected)
+        #expect(document.currentFormat == format)
+        #expect(try fixture.savedFiles().isEmpty)
+    }
+
+    @Test func addingFromShortcutsAppendsParagraphsToAnRTFDraft() async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.drafts.format = .rtf
+        document.newFile()
+        document.onboarding.complete()
+        try await document.add("First")
+        try await document.add("Second")
+        #expect(try PadRichText.document(from: document.text).plainText == "First\nSecond")
+    }
+
+    @Test func addingFromShortcutsAfterTheClearTimeStartsANewDraft() async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        let document = fixture.document
+        document.onboarding.complete()
+        document.text = "old"
+        document.close(now: .now.addingTimeInterval(-3_600))
+        try await document.add("new")
+        #expect(document.text == "new")
+    }
+
+    @Test func addingFromShortcutsWaitsForTheIntroduction() async throws {
+        let fixture = try ScratchFixture()
+        defer { fixture.cleanUp() }
+        await #expect(throws: PadIntentError.introductionNotFinished) { try await fixture.document.add("text") }
+        #expect(fixture.document.text.isEmpty)
     }
 
     @Test func sharingADraftUsesItsFutureNameWithoutSavingOrUsingTheNumber() throws {

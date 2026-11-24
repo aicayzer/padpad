@@ -1,4 +1,5 @@
 import AppKit
+import InkKitRTF
 import KeyboardShortcuts
 
 // The quick pad's lifecycle: showing and hiding, clearing drafts, onboarding and preferences.
@@ -224,4 +225,42 @@ extension PadDocument {
     }
 
     func expand() { panel?.toggleExpanded() }
+
+    /// Adds text from Shortcuts to the end of the quick pad's document and shows it. Showing follows the usual
+    /// rules, so a draft past its clear time is cleared first and the text starts a new one.
+    func add(_ addition: String) async throws {
+        guard isQuickPad, !addition.isEmpty else { return }
+        guard onboarding.hasCompleted, !onboarding.isPresented else { throw PadIntentError.introductionNotFinished }
+        if !isVisible { showCurrent() }
+        // Read the editor's latest text first, so nothing typed is lost; an editor still loading already has `text`.
+        if currentFormat.usesEditor, markdownEditor?.isReady == true {
+            guard await captureLatestEditor() else { throw PadIntentError.busy }
+        }
+        switch currentFormat {
+        case .rtf:
+            var document = try PadRichText.document(from: text)
+            let added = RichTextDocument(plainText: addition).blocks
+            document.blocks = document.plainText.isEmpty ? added : document.blocks + added
+            text = try PadRichText.text(for: document)
+        case .md, .txt:
+            let separator = currentFormat == .md ? "\n\n" : "\n"
+            let trimmed = text.replacing(/\n+$/, with: "")
+            text = trimmed.isEmpty ? addition : trimmed + separator + addition
+        }
+        reloadEditor()
+        show()
+        panel?.resumeEditor()
+    }
+}
+
+/// A Shortcuts action that PadPad can't carry out right now.
+enum PadIntentError: Error, CustomLocalizedStringResourceConvertible {
+    case introductionNotFinished, busy
+
+    var localizedStringResource: LocalizedStringResource {
+        switch self {
+        case .introductionNotFinished: "Finish the PadPad introduction first."
+        case .busy: "PadPad is busy. Try again."
+        }
+    }
 }

@@ -15,6 +15,7 @@ A small place for text, Markdown, and RTF on your Mac. Keep a quick pad close at
 - Find and replace text in every document.
 - Save, rename, share, or copy your writing. Use File > Print to print or save a PDF.
 - Set a comfortable window size and reading width.
+- Show the quick pad or add text to it from Shortcuts, Spotlight, or Siri.
 
 ## Get PadPad
 

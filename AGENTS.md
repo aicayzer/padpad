@@ -77,7 +77,7 @@ Scratch text is intentionally temporary, because the quick pad is a scratch surf
 - `editor/` is a thin host bootstrap for `@aicayzer/inkkit`, bundled offline. [editor/BRIDGE.md](editor/BRIDGE.md) defines the bridge protocol. InkKit owns Markdown preservation, tables, clipboard conversion and optional managed images, so a shared-engine fix and its regression test belong in the InkKit repository. Tests here check the package facade.
 - The app delegate owns the lifecycle through `PadWorkspace`, which retains the quick pad and the independent file documents. Menus target the focused document; Settings configure the quick pad and shared preferences.
 - `project.yml` is the source for identity and build configuration. The generated `Pad.xcodeproj` and shared schemes are committed for Xcode Cloud; regenerate and commit them together, because CI fails if they differ.
-- Release is PadPad with the standard icon. Debug is PadPad Dev, with its own identity, preferences, shortcut and DEV icon. Test hosts use disposable storage and disable global shortcuts.
+- Release is PadPad with the standard icon. Debug is PadPad Dev, with its own identity, preferences, shortcut and DEV icon. Test hosts use disposable storage, disable global shortcuts and never join the Dock: only the app's own `AppSettings` (`ownsActivationPolicy`) changes the activation policy.
 
 ## Verification
 

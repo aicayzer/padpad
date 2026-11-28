@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         let defaults = Self.isTestHost ? UserDefaults(suiteName: "tests-\(UUID().uuidString)")! : .standard
-        settings = AppSettings(defaults: defaults)
+        settings = AppSettings(defaults: defaults, ownsActivationPolicy: !Self.isTestHost)
         workspace = PadWorkspace(settings: settings, defaults: defaults, presentsWindows: !Self.isTestHost)
         super.init()
         // Shortcuts can launch PadPad just to run an action, so the workspace must be available from the start.

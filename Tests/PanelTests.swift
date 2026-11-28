@@ -130,10 +130,12 @@ struct PanelTests {
         let secondURL = root.appending(path: "second.txt")
         try Data("First".utf8).write(to: firstURL)
         try Data("Second".utf8).write(to: secondURL)
-        let settings = AppSettings(defaults: defaults)
+        let oldPolicy = NSApp.activationPolicy()
+        let settings = AppSettings(defaults: defaults, ownsActivationPolicy: true)
         let workspace = PadWorkspace(settings: settings, defaults: defaults, defaultFolder: root, presentAlert: AlertRecorder().present)
         let quick = workspace.quickPad
         defer {
+            NSApp.setActivationPolicy(oldPolicy)
             for document in workspace.allDocuments {
                 if let sheet = document.nativeWindow?.attachedSheet {
                     NSApp.endSheet(sheet, returnCode: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue)

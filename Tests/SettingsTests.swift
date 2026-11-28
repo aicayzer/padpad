@@ -88,6 +88,29 @@ import Testing
         #expect(AppAccess.visibleChoices.contains(.hidden))
     }
 
+    @Test func onlyTheAppsOwnSettingsChangeTheDockMembership() {
+        let suite = "pad-settings-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        // A test host launches as a UI element; settings that tests create must never add it to the Dock.
+        let hostPolicy = NSApp.activationPolicy()
+        let settings = AppSettings(defaults: defaults)
+        #expect(!settings.ownsActivationPolicy)
+        #expect(settings.requiredActivationPolicy == .regular)
+
+        let steps: [(AppSettings) -> Void] = [
+            { $0.setAccess(.menuBar) }, { $0.hasFileWindows = true }, { $0.hasFileWindows = false },
+            { $0.setAccess(.dock) }, { $0.applyActivationPolicy() }
+        ]
+        let required: [NSApplication.ActivationPolicy] = [.accessory, .regular, .accessory, .regular, .regular]
+        for (step, policy) in zip(steps, required) {
+            step(settings)
+            #expect(settings.requiredActivationPolicy == policy)
+            #expect(NSApp.activationPolicy() == hostPolicy)
+        }
+        #expect(settings.activationPolicyError == nil)
+    }
+
     @Test func hiddenAccessPersistsWithoutShortcut() {
         let suite = "pad-settings-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

@@ -6,6 +6,9 @@ import SwiftUI
 @Observable
 final class AppSettings {
     let diagnostics: PadDiagnostics
+    /// Whether these settings drive the process's Dock membership. Only the running app's own settings do, so
+    /// settings that tests create, and the app's settings inside a test host, never put the host in the Dock.
+    let ownsActivationPolicy: Bool
     private let defaults: UserDefaults
     private var dimensions: [Dimension: Double]
     var quickPadWidth: Double {
@@ -134,8 +137,9 @@ final class AppSettings {
     /// PadPad's own accent, as an sRGB hex string.
     static let defaultAccent = "BEBAFC"
 
-    init(defaults: UserDefaults = .standard, diagnosticCacheURL: URL? = nil) {
+    init(defaults: UserDefaults = .standard, diagnosticCacheURL: URL? = nil, ownsActivationPolicy: Bool = false) {
         self.defaults = defaults
+        self.ownsActivationPolicy = ownsActivationPolicy
         diagnostics = PadDiagnostics(defaults: defaults, cacheURL: diagnosticCacheURL)
         var dimensions = Dimension.allCases.reduce(into: [Dimension: Double]()) { stored, dimension in
             stored[dimension] = dimension.clamped(defaults.object(forKey: dimension.rawValue) as? Double ?? dimension.defaultValue)
@@ -194,9 +198,12 @@ final class AppSettings {
         NSApp.appearance = appearance.nativeAppearance
     }
 
+    /// The policy the access preference and open file windows call for.
+    var requiredActivationPolicy: NSApplication.ActivationPolicy { showInDock || hasFileWindows ? .regular : .accessory }
+
     func applyActivationPolicy(restoring window: NSWindow? = nil) {
-        guard !defersActivationPolicy else { return }
-        let policy: NSApplication.ActivationPolicy = (showInDock || hasFileWindows) ? .regular : .accessory
+        guard ownsActivationPolicy, !defersActivationPolicy else { return }
+        let policy = requiredActivationPolicy
         guard NSApp.activationPolicy() != policy else { activationPolicyError = nil; return }
         let restoreWindow = window ?? NSApp.keyWindow
         cancelActivationTransition()
